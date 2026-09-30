@@ -146,3 +146,32 @@
   - audits Excel against Python (budget, BvA, forecast and cash): 409 values, 0 mismatches, 0 Excel errors, model checks OK,
   - writes `summary.json` for the web panel.
 - **Tests:** 30 passed.
+
+## 2026-09-30: Phase 7, web panel
+
+- **`fpa/web/server.py`** (`python -m fpa serve`, port 8766): standard-library server bound to localhost. It reuses the Lunoviq architecture:
+  - job queue and a single worker (one Excel recalculation at a time),
+  - friendly errors (Excel timeout, ledger errors),
+  - traversal-safe run paths,
+  - cache-busted assets,
+  - Quit with a busy check.
+- **Upload of month-end actuals:** `POST /api/upload`, trial balance and KPI CSVs. They are validated in a temporary folder with the ledger rules before saving. The server also:
+  - rejects months outside the year, missing earlier months and missing KPIs;
+  - asks before replacing an existing month.
+
+  `GET /api/sample` serves synthetic files for the next month, for demos.
+- **UI** (vanilla JS/CSS, the Lunoviq design language, light and dark, phone layout):
+  - **Home:** the 12 months of the year (closed / open / forecast) with pack status, and the list of packs.
+  - **Progress view** and **error view** with retry.
+  - **Pack view,** four tabs:
+    - Overview: tiles, revenue and EBITDA charts (actual/forecast bars, budget line), headlines.
+    - Variance: month/YTD toggle, P&L table with materiality dots, commentary, driver-bridge bars, KPIs.
+    - Forecast: budget/base/upside/downside cards, EBITDA chart, latest-estimate assumptions, monthly detail.
+    - Cash: tiles, a warning callout, the 13-week chart with the buffer, the weekly receipts and payments table.
+  - **Load actuals** page.
+- **QA:**
+  - Every page was captured at full size, and the phone layout checked at 375px with no horizontal overflow.
+  - Fixed: a duplicate "No file chosen" (custom file picker), a stray focus outline on `main`, and a visible scrollbar on the tabs.
+  - The web tests found a `log_message` crash on 404 responses; fixed.
+  - A real pack build from the API passed the audit: 409 values, 0 mismatches, checks OK.
+- **Tests:** 7 new web API tests (pipeline stubbed); 37 in total.
