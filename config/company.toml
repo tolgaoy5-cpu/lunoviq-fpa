@@ -76,3 +76,23 @@ month_abs = 1000.0
 month_pct = 0.10
 ytd_abs = 3000.0
 ytd_pct = 0.05
+
+[cash]
+# Office bank account (client money is held separately in trust and excluded).
+opening_balance = 185000.0            # at the end of the last closed month
+minimum_balance = 50000.0             # board-approved buffer
+vat_rate = 0.20
+vat_quarter_end_months = [3, 6, 9, 12]
+vat_payment_lag_days = 37             # one month and seven days after the quarter end
+payroll_day = 28                      # net pay and commission
+paye_day = 22                         # PAYE/NI and pension, following month
+supplier_day = 15                     # suppliers paid on 30-day terms, following month
+employee_deductions = 0.17            # income tax and employee NI, % of gross (paid to HMRC)
+employee_pension = 0.05               # employee pension, % of gross (paid to the pension provider)
+office_rent_share = 0.73              # share of office rent and rates that is rent (quarterly in advance, + VAT)
+rent_quarter_days = ["03-25", "06-24", "09-29", "12-25"]
+invoice_terms_days = 14               # let-only and set-up fees are invoiced to landlords
+rent_collection_profile = [0.60, 0.20, 0.10, 0.10]   # share of rent collected in days 1-7, 8-14, 15-21, 22-end
+corporation_tax_due = "2027-01-01"    # FY2025/26 liability: nine months and a day after the year end
+corporation_tax_fy_prior = 0.0        # filled from the prior-year actuals if 0
+dividends = [["2026-12-18", 120000.0]]   # planned interim dividend to the shareholders

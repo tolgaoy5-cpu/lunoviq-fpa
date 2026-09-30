@@ -100,3 +100,23 @@
 
 - **Excel vs Python:** the forecast full year matches on every account.
 - **Tests:** 23 passed.
+
+## 2026-09-30: Phase 5, 13-week cash flow
+
+- **`fpa/cash.py`:** 13-week cash forecast for the office account, built from the 6+6 monthly P&L with UK timing rules (config `[cash]`).
+  - **Receipts:**
+    - fees deducted from rent as it is collected (60% in the first week),
+    - let-only and set-up fees on 14-day terms,
+    - VAT at 20%, net of bad debts.
+  - **Payments:**
+    - net pay on the 28th,
+    - PAYE/NI and pension on the 22nd of the next month,
+    - suppliers on the 15th of the next month (VAT where charged),
+    - office rent quarterly in advance on the English quarter days,
+    - monthly business rates,
+    - the VAT return one month and seven days after the quarter end,
+    - the planned interim dividend (£120k on 18 December).
+  - **Warning:** corporation tax for FY2025/26 (£47.7k), due on 1 January 2027, falls just after the window.
+- **Cash13W sheet:** weekly receipts and payments, with formulas for totals, net flow, opening/closing roll, buffer, headroom and a below-buffer flag. Opening balance and buffer are named inputs.
+- **Result:** the lowest closing balance is £102.3k (week 13). After the 1 January tax payment it would be £54.6k against a £50k buffer, so there is little headroom. This is the board discussion point on phasing the dividend.
+- **Tests:** 27 passed, including Excel = Python on every weekly closing balance.

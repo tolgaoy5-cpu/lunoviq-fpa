@@ -362,7 +362,11 @@ def build(co, path, month=None, root=None):
         out["forecast"] = forecast_sheet(wb, co, months, sc["base"], out["actuals"])
         out["scenarios"] = scenarios_sheet(wb, co, sc)
         out["scenario_results"] = sc
-        order = ["BvA", "Forecast", "Scenarios", "Actuals", "Budget", "Drivers", "Assumptions"]
+        from . import cash
+        cf = cash.build(co, month, fc=sc["base"], root=root)
+        out["cash"] = cash_sheet(wb, co, cf)
+        out["cash_result"] = cf
+        order = ["BvA", "Forecast", "Scenarios", "Cash13W", "Actuals", "Budget", "Drivers", "Assumptions"]
         wb._sheets = [wb[n] for n in order] + [ws for ws in wb._sheets if ws.title not in order]
     wb.calculation.fullCalcOnLoad = True
     wb.save(path)
@@ -712,3 +716,88 @@ def scenarios_sheet(wb, co, sc):
         ws.cell(row=row, column=1, value=n.capitalize()).font = F_BOLD
         ws.cell(row=row, column=2, value=d.get("description", "")).font = F_BASE
     return out
+
+
+def cash_sheet(wb, co, cf):
+    from .cash import PAYMENT_LINES, RECEIPT_LINES
+    ws = wb.create_sheet("Cash13W")
+    _title(ws, "13-week cash flow: office account",
+           "%s. GBP, incl. VAT. Built from the %s forecast with the timing rules in config [cash]; "
+           "client money excluded." % (co.name, cf["forecast_label"]))
+    ws.column_dimensions["A"].width = 30
+    ws.column_dimensions["B"].width = 3
+    ws.column_dimensions["C"].width = 3
+    for i in range(14):
+        ws.column_dimensions[get_column_letter(FIRST_COL + i)].width = 10
+    wcol = lambda i: get_column_letter(FIRST_COL + i)
+    last = wcol(12)
+    ws.cell(row=4, column=1, value="Week commencing")
+    ws.cell(row=5, column=1, value="Week")
+    for c in range(1, FIRST_COL + 14):
+        for r in (4, 5):
+            ws.cell(row=r, column=c).fill, ws.cell(row=r, column=c).font = FILL_HEAD, F_HEAD
+    for i, (w0, _) in enumerate(cf["weeks"]):
+        for r, v in ((4, w0.strftime("%d-%b")), (5, i + 1)):
+            ws.cell(row=r, column=FIRST_COL + i, value=v).alignment = Alignment(horizontal="right")
+    ws.cell(row=4, column=FIRST_COL + 13, value="13 weeks").alignment = Alignment(horizontal="right")
+    rows, row = {}, 6
+
+    def line(label, values=None, formula=None, font=F_BASE, fmt=VAR, total=True, border=None):
+        nonlocal row
+        ws.cell(row=row, column=1, value=label).font = font
+        for i in range(13):
+            v = formula(i, wcol(i)) if formula else round(values[i], 2)
+            c = ws.cell(row=row, column=FIRST_COL + i, value=v)
+            c.number_format, c.font = fmt, font
+            if border:
+                c.border = border
+        if total:
+            c = ws.cell(row=row, column=FIRST_COL + 13, value="=SUM(%s%d:%s%d)" % (wcol(0), row, last, row))
+            c.number_format, c.font = fmt, F_BOLD
+        rows[label] = row
+        row += 1
+        return row - 1
+
+    for sec, lines_ in (("Receipts", RECEIPT_LINES), ("Payments", PAYMENT_LINES)):
+        _bva_section(ws, row, sec)
+        row += 1
+        first = row
+        for l in lines_:
+            line(l, cf["table"][(sec, l)])
+        r0, r1 = first, row - 1
+        line("Total " + sec.lower(), formula=lambda i, c, r0=r0, r1=r1: "=SUM(%s%d:%s%d)" % (c, r0, c, r1),
+             font=F_BOLD, border=TOP)
+        row += 1
+    rr, pr = rows["Total receipts"], rows["Total payments"]
+    net = line("Net cash flow", formula=lambda i, c: "=%s%d+%s%d" % (c, rr, c, pr), font=F_BOLD, border=TOP_BOTTOM)
+    row += 1
+    op = row
+    cl = row + 1
+    line("Opening balance", formula=lambda i, c: ("=cash_opening" if i == 0 else "=%s%d" % (wcol(i - 1), cl)),
+         fmt=GBP, total=False)
+    line("Closing balance", formula=lambda i, c: "=%s%d+%s%d" % (c, op, c, net), font=F_BOLD, fmt=GBP, total=False,
+         border=TOP_BOTTOM)
+    mn = line("Minimum balance (buffer)", formula=lambda i, c: "=cash_minimum", fmt=GBP, total=False)
+    line("Headroom over the buffer", formula=lambda i, c: "=%s%d-%s%d" % (c, cl, c, mn), fmt=VAR, total=False)
+    line("Below buffer?", formula=lambda i, c: '=IF(%s%d<%s%d,"YES","")' % (c, cl, c, mn), fmt="@", total=False)
+    row += 1
+    for label, v, name, fmt in (("Opening balance at %s" % cf["weeks"][0][0].strftime("%d %b %Y"), cf["opening"], "cash_opening", GBP),
+                                ("Minimum balance (board buffer)", cf["minimum"], "cash_minimum", GBP)):
+        ws.cell(row=row, column=1, value=label).font = F_BASE
+        c = ws.cell(row=row, column=FIRST_COL, value=v)
+        c.font, c.number_format = F_INPUT, fmt
+        _name(wb, name, "Cash13W", "$%s$%d" % (wcol(0), row))
+        row += 1
+    ct = cf["corporation_tax"]
+    row += 1
+    _bva_section(ws, row, "Notes")
+    for text in ("Corporation tax for FY2025/26 of £%s is due on %s (week 14, just after this window): "
+                 "balance after payment £%s vs the £%s buffer."
+                 % ("{:,.0f}".format(ct["amount"]), ct["due"].strftime("%d %b %Y"),
+                    "{:,.0f}".format(ct["balance_after"]), "{:,.0f}".format(cf["minimum"])),
+                 "Lowest closing balance in the window: £%s (week %d)." % ("{:,.0f}".format(cf["lowest"]), cf["lowest_week"]),
+                 "Receipts are net of bad debts; VAT is collected on fees and paid quarterly."):
+        row += 1
+        ws.cell(row=row, column=1, value=text).font = F_BASE
+    ws.freeze_panes = "D6"
+    return {"rows": rows, "closing": cl}
