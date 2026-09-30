@@ -120,3 +120,29 @@
 - **Cash13W sheet:** weekly receipts and payments, with formulas for totals, net flow, opening/closing roll, buffer, headroom and a below-buffer flag. Opening balance and buffer are named inputs.
 - **Result:** the lowest closing balance is £102.3k (week 13). After the 1 January tax payment it would be £54.6k against a £50k buffer, so there is little headroom. This is the board discussion point on phasing the dividend.
 - **Tests:** 27 passed, including Excel = Python on every weekly closing balance.
+
+## 2026-09-30: Phase 6, management pack, checks and monthly pipeline
+
+- **Sheets:**
+  - **Cover:** contents with hyperlinks and the model-check status.
+  - **Dashboard:** six KPI tiles and three charts:
+    - revenue, actual/forecast vs budget;
+    - EBITDA, actual/forecast vs budget;
+    - 13-week closing cash vs the minimum balance.
+
+    It also carries headline commentary.
+  - **Checks:** nine reconciliations between the sheets, a cash buffer warning and an overall status.
+- **Pack layout:** landscape, fit to width, with a footer. The Dashboard prints on one page.
+- **Visual QA:** the sheets were exported to PDF through Excel and inspected. Fixes:
+  - chart y-axes start at 0 (the revenue chart started at 85k and exaggerated the variances);
+  - smaller chart titles;
+  - headline rows no longer clipped;
+  - chart data kept off the printed page;
+  - section bands in Cash13W run the full width;
+  - variances are rounded so an exact zero shows as "-".
+- **`fpa/pipeline.py`** and `python -m fpa run --month 2026-09`:
+  - builds the pack in `output/<month>_<stamp>/`,
+  - recalculates it in Excel,
+  - audits Excel against Python (budget, BvA, forecast and cash): 409 values, 0 mismatches, 0 Excel errors, model checks OK,
+  - writes `summary.json` for the web panel.
+- **Tests:** 30 passed.

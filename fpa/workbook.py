@@ -366,8 +366,19 @@ def build(co, path, month=None, root=None):
         cf = cash.build(co, month, fc=sc["base"], root=root)
         out["cash"] = cash_sheet(wb, co, cf)
         out["cash_result"] = cf
-        order = ["BvA", "Forecast", "Scenarios", "Cash13W", "Actuals", "Budget", "Drivers", "Assumptions"]
+        out["checks"] = checks_sheet(wb, co, out)
+        dashboard_sheet(wb, co, out)
+        cover_sheet(wb, co, out)
+        order = ["Cover", "Dashboard", "BvA", "Forecast", "Scenarios", "Cash13W", "Actuals", "Budget", "Drivers",
+                 "Assumptions", "Checks"]
         wb._sheets = [wb[n] for n in order] + [ws for ws in wb._sheets if ws.title not in order]
+    for ws in wb.worksheets:
+        ws.page_setup.orientation = "landscape"
+        ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.print_options.horizontalCentered = True
+        ws.oddFooter.left.text = co.name
+        ws.oddFooter.right.text = "&A  |  page &P of &N"
     wb.calculation.fullCalcOnLoad = True
     wb.save(path)
     return out
@@ -499,7 +510,7 @@ def bva_sheet(wb, co, months, res):
         ws["I%d" % row] = "=SUMPRODUCT(%s*(Actuals!$D$3:$O$3<=r_sel))" % rng("Actuals")
         ws["J%d" % row] = "=SUMPRODUCT(%s*(Budget!$D$3:$O$3<=r_sel))" % rng("Budget")
         for v, a_, b_ in (("F", "D", "E"), ("K", "I", "J")):
-            ws["%s%d" % (v, row)] = ("=%s%d-%s%d" if k == "revenue" else "=%s%d-%s%d") % (
+            ws["%s%d" % (v, row)] = "=ROUND(%s%d-%s%d,2)" % (
                 (a_, row, b_, row) if k == "revenue" else (b_, row, a_, row))
         ws["G%d" % row] = "=IF(E%d=0,0,F%d/ABS(E%d))" % (row, row, row)
         ws["L%d" % row] = "=IF(J%d=0,0,K%d/ABS(J%d))" % (row, row, row)
@@ -570,9 +581,9 @@ def bva_sheet(wb, co, months, res):
     return rows
 
 
-def _bva_section(ws, row, text):
+def _bva_section(ws, row, text, ncols=13):
     ws.cell(row=row, column=1, value=text).font = F_BOLD
-    for col in range(1, 14):
+    for col in range(1, ncols + 1):
         ws.cell(row=row, column=col).fill = FILL_SECTION
 
 
@@ -759,7 +770,7 @@ def cash_sheet(wb, co, cf):
         return row - 1
 
     for sec, lines_ in (("Receipts", RECEIPT_LINES), ("Payments", PAYMENT_LINES)):
-        _bva_section(ws, row, sec)
+        _bva_section(ws, row, sec, FIRST_COL + 13)
         row += 1
         first = row
         for l in lines_:
@@ -790,7 +801,7 @@ def cash_sheet(wb, co, cf):
         row += 1
     ct = cf["corporation_tax"]
     row += 1
-    _bva_section(ws, row, "Notes")
+    _bva_section(ws, row, "Notes", FIRST_COL + 13)
     for text in ("Corporation tax for FY2025/26 of £%s is due on %s (week 14, just after this window): "
                  "balance after payment £%s vs the £%s buffer."
                  % ("{:,.0f}".format(ct["amount"]), ct["due"].strftime("%d %b %Y"),
@@ -801,3 +812,224 @@ def cash_sheet(wb, co, cf):
         ws.cell(row=row, column=1, value=text).font = F_BASE
     ws.freeze_panes = "D6"
     return {"rows": rows, "closing": cl}
+
+
+def checks_sheet(wb, co, out):
+    ws = wb.create_sheet("Checks")
+    _title(ws, "Model checks", "Each check recomputes a figure two ways; the difference must be within the tolerance.")
+    ws.column_dimensions["A"].width = 64
+    for col, w in (("B", 14), ("C", 10), ("D", 10)):
+        ws.column_dimensions[col].width = w
+    for col, h in enumerate(["Check", "Difference", "Tolerance", "Status"], start=1):
+        c = ws.cell(row=4, column=col, value=h)
+        c.fill, c.font = FILL_HEAD, F_HEAD
+    b, a, f = out["budget"], out["actuals"]["pnl"], out["forecast"]["pnl"]
+    bva, cr = out["bva"], out["cash"]
+    sel_cols = "Actuals!$D$3:$O$3<=r_sel"
+    checks = [
+        ("Budget: EBITDA = revenue - operating costs (full year)",
+         "=Budget!P%d-(Budget!P%d-Budget!P%d)" % (b["ebitda"], b["revenue"], b["opex"]), 0.01),
+        ("Budget: full year = sum of the 12 months (revenue)",
+         "=Budget!P%d-SUM(Budget!D%d:O%d)" % (b["revenue"], b["revenue"], b["revenue"]), 0.01),
+        ("Actuals: net income = EBITDA - depreciation - tax (YTD)",
+         "=SUMPRODUCT(Actuals!$D$%d:$O$%d*(%s))-(SUMPRODUCT(Actuals!$D$%d:$O$%d*(%s))-SUMPRODUCT(Actuals!$D$%d:$O$%d*(%s))-SUMPRODUCT(Actuals!$D$%d:$O$%d*(%s)))"
+         % (a["net_income"], a["net_income"], sel_cols, a["ebitda"], a["ebitda"], sel_cols,
+            a["L7000"], a["L7000"], sel_cols, a["L9000"], a["L9000"], sel_cols), 0.01),
+        ("BvA: YTD actual revenue = Actuals sheet", "=BvA!I%d-SUMPRODUCT(Actuals!$D$%d:$O$%d*(%s))"
+         % (bva["revenue"], a["revenue"], a["revenue"], sel_cols), 0.01),
+        ("BvA: YTD budget EBITDA = Budget sheet", "=BvA!J%d-SUMPRODUCT(Budget!$D$%d:$O$%d*(Budget!$D$3:$O$3<=r_sel))"
+         % (bva["ebitda"], b["ebitda"], b["ebitda"]), 0.01),
+        ("BvA: EBITDA variance = revenue variance + cost variance (YTD)",
+         "=BvA!K%d-(BvA!K%d+BvA!K%d)" % (bva["ebitda"], bva["revenue"], bva["opex"]), 0.01),
+        ("Forecast: closed months equal actuals (revenue)",
+         "=SUMPRODUCT(Forecast!$D$%d:$O$%d*(%s))-SUMPRODUCT(Actuals!$D$%d:$O$%d*(%s))"
+         % (f["revenue"], f["revenue"], sel_cols, a["revenue"], a["revenue"], sel_cols), 0.01),
+        ("Forecast: full-year EBITDA = Scenarios base", "=Forecast!P%d-Scenarios!C%d"
+         % (f["ebitda"], out["scenarios"]["EBITDA"]), 0.5),
+        ("Cash: closing week 13 = opening + net cash flows",
+         "=Cash13W!P%d-(cash_opening+Cash13W!Q%d)" % (cr["closing"], cr["rows"]["Net cash flow"]), 0.01),
+    ]
+    row = 5
+    first = row
+    for label, formula, tol in checks:
+        ws.cell(row=row, column=1, value=label).font = F_BASE
+        c = ws.cell(row=row, column=2, value=formula)
+        c.number_format, c.font = GBP2, F_BASE
+        ws.cell(row=row, column=3, value=tol).number_format = GBP2
+        ws.cell(row=row, column=4, value='=IF(ABS(B%d)<=C%d,"OK","CHECK")' % (row, row)).font = F_BOLD
+        row += 1
+    warn = row
+    ws.cell(row=row, column=1, value="Cash: no week below the minimum balance (warning)").font = F_BASE
+    ws.cell(row=row, column=4, value='=IF(COUNTIF(Cash13W!D%d:P%d,"YES")=0,"OK","WARN")'
+            % (cr["rows"]["Below buffer?"], cr["rows"]["Below buffer?"])).font = F_BOLD
+    row += 2
+    ws.cell(row=row, column=1, value="Overall").font = F_BOLD
+    c = ws.cell(row=row, column=4, value='=IF(COUNTIF(D%d:D%d,"CHECK")=0,"OK","CHECK")' % (first, warn))
+    c.font = F_BOLD
+    _name(wb, "checks_overall", "Checks", "$D$%d" % row)
+    return {"first": first, "last": warn, "overall": row}
+
+
+def _k(v):
+    return "£%.1fk" % (v / 1000) if abs(v) < 1e6 else "£%.2fm" % (v / 1e6)
+
+
+def dashboard_sheet(wb, co, out):
+    from openpyxl.chart import BarChart, LineChart, Reference
+    res, fc, cf = out["variance"], out["scenario_results"]["base"], out["cash_result"]
+    ws = wb.create_sheet("Dashboard")
+    month = res["month"]
+    _title(ws, "%s: management dashboard, %s" % (co.name, _month_label(month)),
+           "GBP, ex VAT (cash incl. VAT). Budget %s; forecast %s." % (co.fy_label(), fc["label"]))
+    for col in "ABCDEFGHIJKL":
+        ws.column_dimensions[col].width = 14
+    tm, ty = res["totals"]["month"], res["totals"]["ytd"]
+    tiles = [
+        ("Revenue, %s" % _month_label(month), tm["revenue"]["actual"], tm["revenue"]["var"]),
+        ("Revenue, year to date", ty["revenue"]["actual"], ty["revenue"]["var"]),
+        ("EBITDA, year to date", ty["ebitda"]["actual"], ty["ebitda"]["var"]),
+        ("EBITDA, full-year forecast", fc["fy_totals"]["ebitda"], fc["fy_totals"]["ebitda"] - fc["budget_fy_totals"]["ebitda"]),
+        ("Lowest cash, next 13 weeks", cf["lowest"], cf["lowest"] - cf["minimum"]),
+        ("Properties under management", res["kpis"][0][1], res["kpis"][0][1] - res["kpis"][0][2]),
+    ]
+    for j, (label, value, var) in enumerate(tiles):
+        col = 1 + 2 * j
+        ws.merge_cells(start_row=4, start_column=col, end_row=4, end_column=col + 1)
+        ws.merge_cells(start_row=5, start_column=col, end_row=5, end_column=col + 1)
+        ws.merge_cells(start_row=6, start_column=col, end_row=6, end_column=col + 1)
+        a = ws.cell(row=4, column=col, value=label)
+        a.font, a.fill = Font(name=FONT, size=8, color="FFFFFF", bold=True), FILL_HEAD
+        is_count = "Properties" in label
+        v = ws.cell(row=5, column=col, value=("%.0f" % value) if is_count else _k(value))
+        v.font, v.alignment = Font(name=FONT, size=16, bold=True, color=NAVY), Alignment(horizontal="left")
+        suffix = "vs budget" if "cash" not in label.lower() else "over the buffer"
+        t = ("%+.0f %s" % (var, suffix)) if is_count else ("%s%s %s" % ("+" if var >= 0 else "-", _k(abs(var)), suffix))
+        w = ws.cell(row=6, column=col, value=t)
+        w.font = Font(name=FONT, size=9, color="1B5E20" if var >= 0 else "B71C1C")
+        for r in (4, 5, 6):
+            for cc in (col, col + 1):
+                if r > 4:
+                    ws.cell(row=r, column=cc).fill = FILL_SECTION
+
+    # chart data (hidden helper table)
+    base = 60
+    ws.cell(row=base, column=1, value="Chart data").font = F_NOTE
+    heads = ["Month", "Actual / forecast revenue", "Budget revenue", "Actual / forecast EBITDA", "Budget EBITDA"]
+    for j, h in enumerate(heads):
+        ws.cell(row=base + 1, column=1 + j, value=h).font = F_NOTE
+    b = out["budget"]
+    for i, m in enumerate(out["months"]):
+        r = base + 2 + i
+        ws.cell(row=r, column=1, value=_month_label(m) + ("" if fc["source"][m] == "A" else " F"))
+        ws.cell(row=r, column=2, value=round(fc["totals"][m]["revenue"], 2))
+        ws.cell(row=r, column=3, value="=Budget!%s%d" % (mcol(i), b["revenue"]))
+        ws.cell(row=r, column=4, value=round(fc["totals"][m]["ebitda"], 2))
+        ws.cell(row=r, column=5, value="=Budget!%s%d" % (mcol(i), b["ebitda"]))
+    cbase = base + 16
+    ws.cell(row=cbase, column=1, value="Week").font = F_NOTE
+    ws.cell(row=cbase, column=2, value="Closing cash").font = F_NOTE
+    ws.cell(row=cbase, column=3, value="Minimum").font = F_NOTE
+    for i, (w0, _) in enumerate(cf["weeks"]):
+        r = cbase + 1 + i
+        ws.cell(row=r, column=1, value=w0.strftime("%d-%b"))
+        ws.cell(row=r, column=2, value="=Cash13W!%s%d" % (get_column_letter(FIRST_COL + i), out["cash"]["closing"]))
+        ws.cell(row=r, column=3, value="=cash_minimum")
+    for r in range(base, cbase + 15):
+        for c in range(1, 6):
+            ws.cell(row=r, column=c).font = F_NOTE
+            if c > 1 and r > base + 1:
+                ws.cell(row=r, column=c).number_format = GBP
+
+    def style(ch, title, ytitle):
+        from openpyxl.chart.text import RichText, Text
+        from openpyxl.chart.title import Title
+        from openpyxl.drawing.text import CharacterProperties, Paragraph, ParagraphProperties, RegularTextRun
+        cp = CharacterProperties(sz=1000, b=True, solidFill=NAVY)
+        ch.title = Title(tx=Text(rich=RichText(p=[Paragraph(pPr=ParagraphProperties(defRPr=cp),
+                                                             r=[RegularTextRun(rPr=cp, t=title)])])), overlay=False)
+        ch.y_axis.title = ytitle
+        ch.height, ch.width = 7.5, 15.5
+        ch.legend.position = "b"
+        ch.y_axis.numFmt = '#,##0'
+        ch.y_axis.majorGridlines = None
+        ch.y_axis.scaling.min = 0
+        ch.y_axis.delete = False
+        ch.x_axis.delete = False
+        return ch
+
+    cats = Reference(ws, min_col=1, min_row=base + 2, max_row=base + 13)
+    bar = BarChart()
+    bar.add_data(Reference(ws, min_col=2, max_col=3, min_row=base + 1, max_row=base + 13), titles_from_data=True)
+    bar.set_categories(cats)
+    bar.series[0].graphicalProperties.solidFill = "1F3A5F"
+    bar.series[1].graphicalProperties.solidFill = "A9C7DD"
+    ws.add_chart(style(bar, "Revenue: actual and forecast (F) vs budget", "GBP"), "A9")
+    line = LineChart()
+    line.add_data(Reference(ws, min_col=4, max_col=5, min_row=base + 1, max_row=base + 13), titles_from_data=True)
+    line.set_categories(cats)
+    line.series[0].graphicalProperties.line.solidFill = "1F3A5F"
+    line.series[1].graphicalProperties.line.solidFill = "A9C7DD"
+    line.series[1].graphicalProperties.line.dashStyle = "dash"
+    ws.add_chart(style(line, "EBITDA: actual and forecast (F) vs budget", "GBP"), "G9")
+    cash = LineChart()
+    cash.add_data(Reference(ws, min_col=2, max_col=3, min_row=cbase, max_row=cbase + 13), titles_from_data=True)
+    cash.set_categories(Reference(ws, min_col=1, min_row=cbase + 1, max_row=cbase + 13))
+    cash.series[0].graphicalProperties.line.solidFill = "1F3A5F"
+    cash.series[1].graphicalProperties.line.solidFill = "B71C1C"
+    cash.series[1].graphicalProperties.line.dashStyle = "dash"
+    ws.add_chart(style(cash, "13-week cash: closing balance vs minimum", "GBP"), "A25")
+
+    r = 25
+    ws.cell(row=r, column=7, value="Headlines").font = F_BOLD
+    notes = [res["commentary"]["month"][0][1], res["commentary"]["ytd"][0][1]]
+    notes += [("%s: %s" % (l, t)) for l, t, _ in res["commentary"]["ytd"][1:4]]
+    notes.append("Full-year forecast (%s): EBITDA %s vs budget %s (%s)."
+                 % (fc["label"], _k(fc["fy_totals"]["ebitda"]), _k(fc["budget_fy_totals"]["ebitda"]),
+                    ("+" if fc["fy_totals"]["ebitda"] >= fc["budget_fy_totals"]["ebitda"] else "-")
+                    + _k(abs(fc["fy_totals"]["ebitda"] - fc["budget_fy_totals"]["ebitda"]))))
+    ct = cf["corporation_tax"]
+    notes.append("Cash: lowest %s in week %d; after corporation tax on %s the balance would be %s vs the %s buffer."
+                 % (_k(cf["lowest"]), cf["lowest_week"], ct["due"].strftime("%d %b"), _k(ct["balance_after"]),
+                    _k(cf["minimum"])))
+    for n in notes:
+        r += 1
+        ws.merge_cells(start_row=r, start_column=7, end_row=r, end_column=12)
+        c = ws.cell(row=r, column=7, value="\u2022 " + n)
+        c.font, c.alignment = F_BASE, Alignment(wrap_text=True, vertical="top")
+        ws.row_dimensions[r].height = 12.5 * (1 + len(n) // 80)
+    ws.cell(row=r + 2, column=7, value="Model checks:").font = F_BOLD
+    ws.cell(row=r + 2, column=8, value="=checks_overall").font = F_BOLD
+    ws.sheet_view.zoomScale = 90
+    ws.print_area = "A1:L%d" % max(42, r + 3)
+
+
+def cover_sheet(wb, co, out):
+    ws = wb.create_sheet("Cover")
+    ws.sheet_view.showGridLines = False
+    ws.column_dimensions["A"].width = 4
+    ws.column_dimensions["B"].width = 26
+    ws.column_dimensions["C"].width = 80
+    ws["B3"] = co.name
+    ws["B3"].font = Font(name=FONT, size=20, bold=True, color=NAVY)
+    ws["B5"] = "Management accounts and forecast: %s" % _month_label(out["variance"]["month"])
+    ws["B5"].font = Font(name=FONT, size=13, color=NAVY)
+    ws["B6"] = "Budget %s; forecast %s. GBP, ex VAT unless stated." % (co.fy_label(), out["scenario_results"]["base"]["label"])
+    ws["B6"].font = F_NOTE
+    ws["B8"], ws["C8"] = "Model checks", "=checks_overall"
+    ws["B8"].font, ws["C8"].font = F_BOLD, F_BOLD
+    contents = [("Dashboard", "KPIs, charts and headlines"),
+                ("BvA", "Budget vs actual: month and year to date, driver bridges, commentary, KPIs"),
+                ("Forecast", "%s rolling forecast and full-year outturn vs budget" % out["scenario_results"]["base"]["label"]),
+                ("Scenarios", "Base, upside and downside full-year outcomes"),
+                ("Cash13W", "13-week cash flow for the office account"),
+                ("Actuals", "Monthly P&L and KPIs from the ledger"),
+                ("Budget", "Driver-based budget P&L"), ("Drivers", "Operating drivers behind the budget"),
+                ("Assumptions", "Budget inputs (blue)"), ("Checks", "Reconciliations between the sheets")]
+    ws["B10"] = "Contents"
+    ws["B10"].font = F_BOLD
+    for i, (name, desc) in enumerate(contents):
+        c = ws.cell(row=11 + i, column=2, value=name)
+        c.hyperlink = "#'%s'!A1" % name
+        c.font = Font(name=FONT, size=10, color="1F5F8B", underline="single")
+        ws.cell(row=11 + i, column=3, value=desc).font = F_BASE
+    ws.cell(row=23, column=2, value="Fictional company and synthetic data, for demonstration.").font = F_NOTE
