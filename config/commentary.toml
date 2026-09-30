@@ -1,0 +1,17 @@
+# Analyst notes: the business reasons behind variances, by month and account.
+# The model calculates the numbers; these notes explain them. (Fictional events.)
+
+["2026-05"]
+"6600" = "A landlord went into administration owing £4k of fees; written off in May."
+
+["2026-06"]
+"5000" = "A property manager resigned at the end of May; the replacement started on 1 September."
+"4010" = "Softer summer lettings market: fewer let-only instructions from June."
+
+["2026-07"]
+"4000" = "A portfolio landlord sold 24 properties in July; the loss was not in the budget."
+"6900" = "Agency cover for the property manager vacancy (July and August)."
+
+["2026-08"]
+"6100" = "A property portal raised its subscription by 15% from August."
+"6900" = "Agency cover for the property manager vacancy (July and August)."

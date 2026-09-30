@@ -30,6 +30,8 @@ TOP = Border(top=Side(style="thin", color="999999"))
 TOP_BOTTOM = Border(top=Side(style="thin", color="999999"), bottom=Side(style="double", color="999999"))
 
 GBP = '#,##0;(#,##0);"-"'
+VAR = '#,##0;[Red](#,##0);"-"'
+VARPCT = '0.0%;[Red](0.0%);"-"'
 GBP2 = '#,##0.00;(#,##0.00);"-"'
 PCT = '0.0%;(0.0%);"-"'
 PCT2 = '0.00%;(0.00%);"-"'
@@ -105,6 +107,13 @@ def _month_header(ws, row, months, co, label=""):
         cell = ws.cell(row=row, column=FIRST_COL + i, value=_month_label(m))
         cell.alignment = Alignment(horizontal="right")
     ws.cell(row=row, column=FIRST_COL + 12, value=co.fy_label()).alignment = Alignment(horizontal="right")
+
+
+def _index_row(ws, row):
+    """Month numbers 1..12 above the header: used by YTD formulas (SUMPRODUCT on <= month)."""
+    for i in range(12):
+        c = ws.cell(row=row, column=FIRST_COL + i, value=i + 1)
+        c.font, c.alignment = F_NOTE, Alignment(horizontal="right")
 
 
 def _month_label(m):
@@ -312,6 +321,7 @@ SUBTOTALS = {
 def budget_sheet(wb, co, months, a, d):
     ws = wb.create_sheet("Budget")
     _title(ws, "Budget P&L: %s" % co.fy_label(), "%s. GBP, ex VAT. Calculated from Drivers and Assumptions." % co.name)
+    _index_row(ws, 3)
     _month_header(ws, 4, months, co, "Management P&L")
     r = pnl_rows(5)
     ref = dict(d, **a, **r)
@@ -332,14 +342,226 @@ def budget_sheet(wb, co, months, a, d):
     return r
 
 
-def build(co, path):
+def build(co, path, month=None, root=None):
+    """Budget sheets; with `month` also Actuals and BvA for that reporting month."""
     wb = Workbook()
     wb.remove(wb.active)
     months = co.fy_months()
     a = assumptions_sheet(wb, co, months)
     d = drivers_sheet(wb, co, months, a)
     b = budget_sheet(wb, co, months, a, d)
+    out = {"assumptions": a, "drivers": d, "budget": b, "months": months}
+    if month:
+        from . import variance
+        res = variance.analyse(co, month, root)
+        out["actuals"] = actuals_sheet(wb, co, months, res)
+        out["bva"] = bva_sheet(wb, co, months, res)
+        out["variance"] = res
+        wb.move_sheet("BvA", offset=-(len(wb.sheetnames) - 1))
+        wb.move_sheet("Actuals", offset=-(len(wb.sheetnames) - 2))
     wb.calculation.fullCalcOnLoad = True
     wb.save(path)
-    return {"assumptions": a, "drivers": d, "budget": b, "months": months}
+    return out
 
+
+
+KPI_ROWS = [("pum_open", "Properties at start of month", NUM), ("gained", "Properties gained", NUM),
+            ("lost", "Properties lost", NUM), ("pum_close", "Properties at end of month", NUM),
+            ("avg_rent", "Average monthly rent", GBP), ("let_only_lets", "Let-only lets", NUM),
+            ("relets", "Re-lets on managed stock", NUM), ("renewals", "Renewals", NUM),
+            ("certificates", "Certificates arranged", NUM), ("headcount", "Headcount", NUM),
+            ("arrears_pct", "Arrears (% of rent roll)", PCT)]
+KPI_TOTAL = {"pum_open": "first", "pum_close": "last", "avg_rent": "avg", "headcount": "last", "arrears_pct": "avg"}
+
+
+def actuals_sheet(wb, co, months, res):
+    ws = wb.create_sheet("Actuals")
+    last = res["month"]
+    _title(ws, "Actuals: %s" % co.fy_label(),
+           "%s. GBP, ex VAT. Monthly trial balance exports; closed months to %s." % (co.name, _month_label(last)))
+    _index_row(ws, 3)
+    _month_header(ws, 4, months, co, "Management P&L")
+    r = pnl_rows(5)
+    act = res["actuals"]
+    for (kind, key, label), row in zip(pnl_layout(), range(5, 5 + len(pnl_layout()))):
+        if kind == "section":
+            _section(ws, row, label)
+        elif kind == "account":
+            _row(ws, row, label, key, lambda i, c, p, key=key: act[months[i]]["pnl"][key] if months[i] in act else None,
+                 GBP, total="sum")
+        elif kind == "subtotal":
+            fn = SUBTOTALS[key]
+            _row(ws, row, label, "", lambda i, c, p, fn=fn: fn(c, r) if months[i] in act else None, GBP, F_BOLD,
+                 total="sum", border=TOP_BOTTOM if key in ("ebitda", "net_income") else TOP)
+        elif kind == "ratio":
+            _row(ws, row, label, "", lambda i, c, p: ("=IF(%s%d=0,0,%s%d/%s%d)" % (c, r["revenue"], c, r["ebitda"], c, r["revenue"]))
+                 if months[i] in act else None, PCT, F_NOTE,
+                 total="=IF(%s%d=0,0,%s%d/%s%d)" % (TOTAL, r["revenue"], TOTAL, r["ebitda"], TOTAL, r["revenue"]))
+    row = 5 + len(pnl_layout()) + 1
+    _section(ws, row, "Operating KPIs")
+    kr = {}
+    for key, label, fmt in KPI_ROWS:
+        row += 1
+        kr[key] = row
+        tot = KPI_TOTAL.get(key, "sum")
+        closed = sum(1 for m in months if m in act)
+        total = {"first": "=%s%d" % (mcol(0), row), "last": "=%s%d" % (mcol(closed - 1), row),
+                 "avg": "=AVERAGE(%s%d:%s%d)" % (mcol(0), row, mcol(closed - 1), row)}.get(tot, "sum")
+        _row(ws, row, label, "", lambda i, c, p, key=key: act[months[i]]["kpis"][key] if months[i] in act else None,
+             fmt, total=total)
+    ws.freeze_panes = "D5"
+    return {"pnl": r, "kpis": kr}
+
+
+BVA_KIND = {"revenue": "revenue", "staff": "expense", "opex": "expense", "ebitda": "revenue", "ebit": "revenue",
+            "net_income": "revenue"}
+
+
+def bva_sheet(wb, co, months, res):
+    ws = wb.create_sheet("BvA")
+    sel = months.index(res["month"]) + 1
+    _title(ws, "Budget vs actual: %s" % _month_label(res["month"]),
+           "%s. GBP, ex VAT. Variance: positive = favourable, red = adverse." % co.name)
+    ws.column_dimensions["A"].width = 30
+    ws.column_dimensions["B"].width = 7
+    ws.column_dimensions["C"].width = 3
+    for col, w in zip("DEFGHIJKLM", (11, 11, 10, 8, 3, 11, 11, 10, 8, 7)):
+        ws.column_dimensions[col].width = w
+    rep = co.cfg["reporting"]
+    inputs = [(4, "Reporting month (1 = April)", sel, "0", "r_sel", None, None),
+              (5, "Materiality, month (GBP and %)", rep["month_abs"], GBP, "r_m_abs", rep["month_pct"], "r_m_pct"),
+              (6, "Materiality, year to date (GBP and %)", rep["ytd_abs"], GBP, "r_y_abs", rep["ytd_pct"], "r_y_pct")]
+    for row, label, v, fmt, name, v2, name2 in inputs:
+        ws.cell(row=row, column=1, value=label).font = F_BASE
+        c = ws.cell(row=row, column=4, value=v)
+        c.font, c.number_format = F_INPUT, fmt
+        _name(wb, name, "BvA", "$D$%d" % row)
+        if name2:
+            c = ws.cell(row=row, column=5, value=v2)
+            c.font, c.number_format = F_INPUT, PCT
+            _name(wb, name2, "BvA", "$E$%d" % row)
+    ws.cell(row=4, column=5, value=_month_label(res["month"])).font = F_NOTE
+
+    ws.cell(row=8, column=4, value="Month").font = F_BOLD
+    ws.cell(row=8, column=9, value="Year to date").font = F_BOLD
+    heads = {1: "", 2: "Code", 4: "Actual", 5: "Budget", 6: "Var", 7: "Var %", 9: "Actual", 10: "Budget",
+             11: "Var", 12: "Var %", 13: "Flag"}
+    for col in range(1, 14):
+        cell = ws.cell(row=9, column=col, value=heads.get(col))
+        cell.fill, cell.font = FILL_HEAD, F_HEAD
+        if col >= 4:
+            cell.alignment = Alignment(horizontal="right")
+    src = pnl_rows(5)
+    row = 10
+    rows = {}
+    for kind, key, label in pnl_layout():
+        if kind == "blank":
+            row += 1
+            continue
+        if kind == "section":
+            ws.cell(row=row, column=1, value=label).font = F_BOLD
+            for col in range(1, 14):
+                ws.cell(row=row, column=col).fill = FILL_SECTION
+            row += 1
+            continue
+        s = src[("L" + key) if kind == "account" else key]
+        rows[key] = row
+        bold = kind == "subtotal"
+        font = F_BOLD if bold else (F_NOTE if kind == "ratio" else F_BASE)
+        ws.cell(row=row, column=1, value=label).font = font
+        if kind == "account":
+            ws.cell(row=row, column=2, value=key).font = F_NOTE
+        if kind == "ratio":
+            r_rev, r_eb = rows["revenue"], rows["ebitda"]
+            for col in "DEIJ":
+                c = ws["%s%d" % (col, row)]
+                c.value = "=IF(%s%d=0,0,%s%d/%s%d)" % (col, r_rev, col, r_eb, col, r_rev)
+                c.number_format, c.font = PCT, font
+            for col, a_, b_ in (("F", "D", "E"), ("K", "I", "J")):
+                c = ws["%s%d" % (col, row)]
+                c.value = "=%s%d-%s%d" % (a_, row, b_, row)
+                c.number_format, c.font = VARPCT, font
+            row += 1
+            continue
+        k = accounts.BY_CODE[key].kind if kind == "account" else BVA_KIND[key]
+        rng = lambda sheet: "%s!$D$%d:$O$%d" % (sheet, s, s)
+        ws["D%d" % row] = "=INDEX(%s,r_sel)" % rng("Actuals")
+        ws["E%d" % row] = "=INDEX(%s,r_sel)" % rng("Budget")
+        ws["I%d" % row] = "=SUMPRODUCT(%s*(Actuals!$D$3:$O$3<=r_sel))" % rng("Actuals")
+        ws["J%d" % row] = "=SUMPRODUCT(%s*(Budget!$D$3:$O$3<=r_sel))" % rng("Budget")
+        for v, a_, b_ in (("F", "D", "E"), ("K", "I", "J")):
+            ws["%s%d" % (v, row)] = ("=%s%d-%s%d" if k == "revenue" else "=%s%d-%s%d") % (
+                (a_, row, b_, row) if k == "revenue" else (b_, row, a_, row))
+        ws["G%d" % row] = "=IF(E%d=0,0,F%d/ABS(E%d))" % (row, row, row)
+        ws["L%d" % row] = "=IF(J%d=0,0,K%d/ABS(J%d))" % (row, row, row)
+        ws["M%d" % row] = ('=TRIM(IF(AND(ABS(F{r})>=r_m_abs,ABS(G{r})>=r_m_pct),"M ","")&'
+                           'IF(AND(ABS(K{r})>=r_y_abs,ABS(L{r})>=r_y_pct),"YTD",""))').format(r=row) if kind == "account" else None
+        for col, fmt in zip("DEFGIJKLM", (GBP, GBP, VAR, VARPCT, GBP, GBP, VAR, VARPCT, "@")):
+            c = ws["%s%d" % (col, row)]
+            c.number_format, c.font = fmt, font
+            if bold:
+                c.border = TOP_BOTTOM if key in ("ebitda", "net_income") else TOP
+        ws["M%d" % row].alignment = Alignment(horizontal="center")
+        row += 1
+
+    row += 1
+    for period, title in (("month", "Commentary: %s" % _month_label(res["month"])), ("ytd", "Commentary: year to date")):
+        _bva_section(ws, row, title)
+        row += 1
+        for label, text, fav in res["commentary"][period]:
+            ws.cell(row=row, column=1, value=label).font = F_BOLD
+            c = ws.cell(row=row, column=2, value=text)
+            c.font = Font(name=FONT, size=9, color="1B5E20" if fav else "B71C1C") if label != "Headline" else F_BASE
+            c.alignment = Alignment(wrap_text=True, vertical="top")
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=13)
+            ws.row_dimensions[row].height = 12 * (1 + len(text) // 120)
+            row += 1
+        row += 1
+
+    _bva_section(ws, row, "Driver bridges (favourable +)")
+    row += 1
+    heads = ["Driver", "", "", "Volume", "Rate", "Other", "Total", "", "Volume", "Rate", "Other", "Total"]
+    ws.cell(row=row, column=4, value="Month").font = F_BOLD
+    ws.cell(row=row, column=9, value="Year to date").font = F_BOLD
+    row += 1
+    for col, h in enumerate(heads, start=1):
+        c = ws.cell(row=row, column=col, value=h or None)
+        c.fill, c.font = FILL_HEAD, F_HEAD
+    ws.cell(row=row, column=13).fill = FILL_HEAD
+    row += 1
+    for name in res["bridges"]["month"]:
+        ws.cell(row=row, column=1, value=name).font = F_BASE
+        for base, period in ((4, "month"), (9, "ytd")):
+            b = res["bridges"][period][name]
+            for j, f in enumerate(("volume", "rate", "other", "var")):
+                c = ws.cell(row=row, column=base + j, value=round(b[f], 2))
+                c.number_format, c.font = VAR, F_BOLD if f == "var" else F_BASE
+        row += 1
+    ws.cell(row=row, column=1, value="Volume = properties, lets or headcount; rate = average rent; "
+                                      "other = collection, fee mix and pay.").font = F_NOTE
+    row += 2
+
+    _bva_section(ws, row, "Operating KPIs: %s" % _month_label(res["month"]))
+    row += 1
+    for col, h in enumerate(["KPI", "", "", "Actual", "Budget", "Var"], start=1):
+        c = ws.cell(row=row, column=col, value=h or None)
+        c.fill, c.font = FILL_HEAD, F_HEAD
+    row += 1
+    for label, a_, b_, kind in res["kpis"]:
+        ws.cell(row=row, column=1, value=label).font = F_BASE
+        fmt = {"number": NUM, "gbp": GBP, "pct": PCT}[kind]
+        for col, v in ((4, a_), (5, b_)):
+            c = ws.cell(row=row, column=col, value=None if v is None else round(v, 4))
+            c.number_format, c.font = fmt, F_BASE
+        if b_ is not None:
+            c = ws.cell(row=row, column=6, value="=D%d-E%d" % (row, row))
+            c.number_format, c.font = VAR if kind != "pct" else VARPCT, F_BASE
+        row += 1
+    ws.freeze_panes = "D10"
+    return rows
+
+
+def _bva_section(ws, row, text):
+    ws.cell(row=row, column=1, value=text).font = F_BOLD
+    for col in range(1, 14):
+        ws.cell(row=row, column=col).fill = FILL_SECTION

@@ -69,3 +69,10 @@ bad_debt_rate = 0.005                  # of fee revenue
 other_overheads = 1500.0
 depreciation = 1200.0
 corporation_tax_rate = 0.25
+
+[reporting]
+# a line is flagged when the variance passes BOTH thresholds (favourable or adverse)
+month_abs = 1000.0
+month_pct = 0.10
+ytd_abs = 3000.0
+ytd_pct = 0.05
