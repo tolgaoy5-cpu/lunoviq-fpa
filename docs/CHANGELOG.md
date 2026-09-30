@@ -33,3 +33,15 @@
   | H1 budget | £648k | £134k | |
 
 - **Tests:** 10 passed.
+
+## 2026-09-30: Phase 2, driver-based budget in Excel with a Python mirror
+
+- **`fpa/budget.py`:** the budget from the driver engine, by month and for the full year.
+- **`fpa/workbook.py`:** generates the workbook with live formulas.
+  - **Assumptions:** 35 named scalar inputs in blue, salaries by role with an NI-able helper column, and monthly seasonality and headcount (the October hire is included).
+  - **Drivers:** portfolio roll-forward, rent, rent roll, lettings activity, headcount, salaries and NI.
+  - **Budget:** management P&L by account with subtotals, EBITDA margin, depreciation, EBIT, tax and net income. Months run across columns D–O, with the full year in column P.
+- **`fpa/recalc.py`:** reused from Lunoviq (sandbox-safe, runs in a child process with a timeout).
+- **Budget FY2026/27:** revenue £1,284,541; EBITDA £239,320 (18.6%); net income £168,690.
+- **Excel vs Python:** they match on every account in every month. The maximum difference is 2p, from rounding.
+- **Tests:** 14 passed, including the Excel recalculation.
