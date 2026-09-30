@@ -16,6 +16,9 @@ API (company = folder name under companies/, default kestrel-row)
                                       any accounting-system export (fpa/importer.py)
     POST /api/companies/preview {text}                  suggested chart from a P&L-by-month export
     POST /api/companies {name, accounts, history, ...}  create a company (fpa/onboard.py)
+    GET  /api/ai                      AI summary settings (provider, model; never the key)
+    POST /api/ai/settings {provider, api_key, model} | {clear: true}
+    POST /api/ai/summary {company, run}   draft the executive summary of a pack (checked figures)
     GET  /api/sample?month=<m>&file=trial_balance|kpis        synthetic export for a demo upload
     POST /api/quit                    stop the server
 """
@@ -261,8 +264,27 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_GET(self):
+        try:
+            return self._get()
+        except Exception:                                   # noqa: BLE001 - always answer the browser
+            traceback.print_exc()
+            return self._json({"error": "Something went wrong on the server; see the log."}, 500)
+
+    def do_POST(self):
+        try:
+            return self._post()
+        except Exception:                                   # noqa: BLE001 - always answer the browser
+            traceback.print_exc()
+            return self._json({"error": "Something went wrong on the server; see the log."}, 500)
+
+    def _get(self):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        if u.path == "/api/ai":
+            from .. import ai
+            cfg = ai.settings()
+            return self._json({"configured": bool(cfg), "provider": cfg and cfg["provider"], "model": cfg and cfg["model"],
+                               "source": "local.toml" if ai.SETTINGS.exists() else ("environment" if cfg else None)})
         if u.path == "/api/state":
             try:
                 return self._json(app_state(q.get("company")))
@@ -277,7 +299,10 @@ class Handler(BaseHTTPRequestHandler):
             p = run_path(q.get("company"), q.get("run"))
             if not p or not (p / "summary.json").exists():
                 return self._json({"error": "Run not found."}, 404)
-            return self._json(json.loads((p / "summary.json").read_text()) | {"run": p.name, "slug": p.parent.name})
+            extra = {"run": p.name, "slug": p.parent.name}
+            if (p / "ai_summary.json").exists():
+                extra["ai_summary"] = json.loads((p / "ai_summary.json").read_text())
+            return self._json(json.loads((p / "summary.json").read_text()) | extra)
         if u.path == "/api/sample":
             month, which = q.get("month", ""), q.get("file", "")
             try:
@@ -335,7 +360,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
         return None
 
-    def do_POST(self):
+    def _post(self):
         u = urlparse(self.path)
         body = self._body()
         if body is None:
@@ -368,6 +393,31 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/companies":
             res, code = create_company(body)
             return self._json(res, code)
+        if u.path == "/api/ai/settings":
+            from .. import ai
+            if body.get("clear"):
+                ai.clear_settings()
+                return self._json({"ok": True})
+            try:
+                ai.save_settings(str(body.get("provider", "openai")), str(body.get("api_key", "")), str(body.get("model", "")))
+            except ai.AIError as e:
+                return self._json({"error": str(e)[:1].upper() + str(e)[1:] + "."}, 400)
+            return self._json({"ok": True})
+        if u.path == "/api/ai/summary":
+            from .. import ai
+            p = run_path(body.get("company"), body.get("run"))
+            if not p or not (p / "summary.json").exists():
+                return self._json({"error": "Pack not found."}, 404)
+            try:
+                res = ai.draft(json.loads((p / "summary.json").read_text()))
+            except ai.AIError as e:
+                return self._json({"error": "No summary: %s." % str(e).rstrip(".")}, 400)
+            except (KeyError, TypeError, ValueError):
+                return self._json({"error": "No summary: this pack has no figures to summarise; rebuild it."}, 400)
+            import datetime as _dt
+            res["created"] = _dt.datetime.now().isoformat(timespec="seconds")
+            (p / "ai_summary.json").write_text(json.dumps(res, indent=1))
+            return self._json(res)
         if u.path == "/api/open":
             p = run_path(body.get("company"), body.get("run"))
             files = list(p.glob("*_FPA_*.xlsx")) if p else []

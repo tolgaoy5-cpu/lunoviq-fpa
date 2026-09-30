@@ -62,6 +62,7 @@ async function route() {
     if (kind === "job" && a) return poll(a);
     if (kind === "upload") return renderUpload();
     if (kind === "add") return renderAdd();
+    if (kind === "settings") return renderSettings();
     return renderHome();
   } catch (e) {
     toast(e.message);
@@ -265,9 +266,60 @@ function renderResult(d, tab = "overview", keep = false) {
   $("#open-xl").onclick = async () => {
     try { await api("/api/open", { method: "POST", body: JSON.stringify({ company: SLUG, run: d.run }) }); toast("Opening in Excel…"); } catch (e) { toast(e.message); }
   };
+  const aib = $("#ai-go");
+  if (aib) aib.onclick = async () => {
+    aib.disabled = true; aib.textContent = "Writing…";
+    const err = $("#ai-err"); err.textContent = "";
+    try {
+      d.ai_summary = await api("/api/ai/summary", { method: "POST", body: JSON.stringify({ company: SLUG, run: d.run }) });
+      renderResult(d, "overview", true);
+    } catch (e) { err.textContent = e.message; aib.disabled = false; aib.textContent = "Draft AI summary"; }
+  };
   const tog = $("#vtoggle");
   if (tog) tog.querySelectorAll("button").forEach((b) => (b.onclick = () => { d._period = b.dataset.p; renderResult(d, "variance", true); }));
   if (!keep) window.scrollTo(0, 0);
+}
+
+function aiCard(d) {
+  const a = d.ai_summary;
+  if (a) return `<section class="card ai-card"><div class="card-head"><h2>Executive summary</h2><span class="pill warn">AI draft · figures checked</span></div>
+    <p class="ai-text">${esc(a.text)}</p>
+    <p class="muted small">Drafted by ${esc(a.provider === "openai" ? "OpenAI" : "Anthropic")} ${esc(a.model)} from the pack's figures; every £ amount and percentage was checked against the pack. Review before sending. <button class="linkbtn" id="ai-go">Redraft</button><span class="form-err" id="ai-err" role="alert"></span></p></section>`;
+  return `<section class="card ai-card empty-ai"><div class="card-head"><h2>Executive summary</h2><span class="muted small">optional</span></div>
+    <p class="muted small">Draft a board-ready summary from this pack's figures with your own OpenAI or Anthropic API key (set in <a href="#/settings">Settings</a>). Only the pack's key figures are sent, and only when you ask. Every number in the draft is checked against the pack.</p>
+    <div class="form-actions"><button class="btn" id="ai-go">Draft AI summary</button><span class="form-err" id="ai-err" role="alert"></span></div></section>`;
+}
+
+async function renderSettings() {
+  show("view-settings");
+  document.title = "Settings · Lunoviq FP&A";
+  let st = { configured: false };
+  try { st = await api("/api/ai"); } catch { /* ignore */ }
+  $("#view-settings").innerHTML = `
+    <div class="run-card upload-card">
+      <p class="eyebrow">Settings</p>
+      <h1>AI executive summary</h1>
+      <p class="lede">Optional. Paste an API key from <b>platform.openai.com</b> (OpenAI) or <b>console.anthropic.com</b> (Anthropic). A ChatGPT subscription is not an API key: API use is billed separately, typically well under 1p per summary.</p>
+      <p class="small">${st.configured ? `<span class="pill ok">Configured</span> ${esc(st.provider === "openai" ? "OpenAI" : "Anthropic")} · model ${esc(st.model)} · stored in ${esc(st.source)}` : '<span class="pill neutral">Not configured</span>'}</p>
+      <form class="form add-form" id="sform" novalidate>
+        <div class="field"><label for="s-prov">Provider</label><div class="inp"><select id="s-prov"><option value="openai"${st.provider !== "anthropic" ? " selected" : ""}>OpenAI</option><option value="anthropic"${st.provider === "anthropic" ? " selected" : ""}>Anthropic</option></select></div></div>
+        <div class="field"><label for="s-model">Model (optional)</label><div class="inp"><input id="s-model" placeholder="${st.provider === "anthropic" ? "claude-sonnet-5" : "gpt-4o-mini"}" value="${st.source === "local.toml" ? esc(st.model || "") : ""}"></div></div>
+        <div class="field" style="grid-column:1/-1"><label for="s-key">API key</label><div class="inp"><input id="s-key" type="password" autocomplete="off" placeholder="${st.configured ? "•••••••• (saved; paste a new key to replace)" : "paste your key"}"></div></div>
+      </form>
+      <p class="muted small">The key is saved only on this computer in <code>local.toml</code> (excluded from git) and is never shown again.</p>
+      <div class="form-actions"><button class="btn btn-primary" id="s-save">Save</button>${st.source === "local.toml" ? '<button class="btn" id="s-clear">Remove key</button>' : ""}<span class="form-err" id="s-err" role="alert"></span></div>
+    </div>`;
+  $("#s-save").onclick = async () => {
+    const err = $("#s-err"); err.textContent = "";
+    const key = $("#s-key").value.trim();
+    if (!key) return (err.textContent = "Paste the API key.");
+    try {
+      await api("/api/ai/settings", { method: "POST", body: JSON.stringify({ provider: $("#s-prov").value, api_key: key, model: $("#s-model").value.trim() }) });
+      toast("Saved"); renderSettings();
+    } catch (e) { err.textContent = e.message; }
+  };
+  const clr = $("#s-clear");
+  if (clr) clr.onclick = async () => { await api("/api/ai/settings", { method: "POST", body: JSON.stringify({ clear: true }) }); toast("Key removed"); renderSettings(); };
 }
 
 function tile(label, value, sub, good, note) {
@@ -281,6 +333,7 @@ function overview(d) {
   const heads = [d.commentary.month[0], d.commentary.ytd[0], ...d.commentary.ytd.slice(1, 4)];
   const ct = c.corporation_tax;
   return `
+    ${aiCard(d)}
     <div class="tiles">
       ${tile("Revenue, " + mlabel(d.month), k(tm.revenue.actual), sk(tm.revenue.var) + " vs budget", tm.revenue.var >= 0)}
       ${tile("Revenue, year to date", k(ty.revenue.actual), sk(ty.revenue.var) + " vs budget", ty.revenue.var >= 0)}

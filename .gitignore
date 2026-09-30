@@ -4,3 +4,4 @@ __pycache__/
 ~$*.xlsx
 output/
 /.claude/
+/local.toml

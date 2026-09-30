@@ -64,7 +64,9 @@ All data is synthetic and reproducible. See [the design notes](docs/DESIGN.md).
 - set-up fees: re-lets;
 - staff costs: headcount vs pay.
 
-**Commentary** combines two sources: text generated from the numbers, and analyst notes for the business reasons (`config/commentary.toml`).
+**Commentary** combines two sources: text generated from the numbers, and analyst notes for the business reasons (`commentary.toml`).
+
+**AI executive summary** (optional). With your own OpenAI or Anthropic API key (Settings), a short board summary is drafted from the pack. Every £ amount and percentage in the draft is checked against the pack before it is shown, and it is labelled as an AI draft. Nothing is sent unless you ask.
 
 **Cash timing rules:**
 - VAT is collected on fees and paid one month and seven days after the quarter.

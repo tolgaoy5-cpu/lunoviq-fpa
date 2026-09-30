@@ -199,3 +199,23 @@ def test_add_company_wizard(base):
     assert s["closed"] == [] and s["next_month"] == "2026-04" and s["fy"] == "FY2026/27"
     assert call(url + "/api/companies", body)[0] == 400                          # already exists
     assert call(url + "/api/companies/preview", {"text": "no,table,here"})[0] == 400
+
+
+def test_ai_settings_and_summary(base, tmp_path, monkeypatch):
+    url, _ = base
+    from fpa import ai
+    monkeypatch.setattr(ai, "SETTINGS", tmp_path / "local.toml")
+    for v in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(v, raising=False)
+    assert call(url + "/api/ai")[1]["configured"] is False
+    assert call(url + "/api/ai/settings", {"provider": "openai", "api_key": "bad"})[0] == 400
+    key = "sk-proj-" + "b" * 40
+    assert call(url + "/api/ai/settings", {"provider": "openai", "api_key": key})[0] == 200
+    code, st = call(url + "/api/ai")
+    assert st["configured"] and st["provider"] == "openai" and key not in json.dumps(st)
+    # the fake pack summary has no figures to draft from -> a clear error, nothing saved
+    code, res = call(url + "/api/ai/summary", {"company": "kestrel-row", "run": RUN})
+    assert code in (400, 500) or "error" in res
+    assert call(url + "/api/ai/summary", {"company": "kestrel-row", "run": "nope"})[0] == 404
+    assert call(url + "/api/ai/settings", {"clear": True})[0] == 200
+    assert call(url + "/api/ai")[1]["configured"] is False

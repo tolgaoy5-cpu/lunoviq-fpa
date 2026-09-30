@@ -253,3 +253,24 @@ The user asked for the system to work for any company, with the example company 
   - Report section headings guide the suggestions, so costs under "Cost of Sales" are classed as cost of sales.
 - **Output:** packs are stored per company in `output/<slug>/`.
 - **Tests:** 62 passed, including Excel, and 13 web tests (wizard, export upload, validation).
+
+## 2026-09-30: Optional AI executive summary (OpenAI or Anthropic)
+
+The user has an OpenAI account and asked to use it.
+
+- **`fpa/ai.py`:** drafts a 5–6 sentence board summary from the pack's key figures:
+  - totals and variances,
+  - commentary,
+  - full-year outturns,
+  - cash.
+
+  **Guardrail:** every £ amount and percentage in the draft is checked against the pack's figures (with rounding tolerance). A draft with an unknown figure is rejected; the model gets one retry with the reason, then the request fails with a clear message. The text is always labelled "AI draft · figures checked".
+- **Settings:** the key goes in `local.toml` (git-ignored, mode 600) or in `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`.
+  - The provider and model are configurable. Defaults: OpenAI `gpt-4o-mini`, Anthropic `claude-sonnet-5`.
+  - The API never returns the key.
+  - Nothing is sent unless the user presses "Draft AI summary".
+- **Web:**
+  - Settings page: provider, model and key (password field), with a remove option.
+  - Overview: an Executive summary card; the draft is saved with the pack as `ai_summary.json`.
+- **Server:** it now always answers. An unexpected exception returns a JSON 500 instead of dropping the connection; the new web test caught the dropped connection.
+- **Tests:** 63 fast. The AI tests mock the service: figure check, retry, give-up, settings privacy and request shape.
