@@ -71,6 +71,23 @@ def test_name_only_export_and_signed_balance(bw):
     assert pnl["200"] == 1000 and pnl["310"] == 400
 
 
+def test_pnl_by_month_with_unnamed_account_column():
+    """QuickBooks-style report: no codes, an empty header over the account names, "Apr 2025" columns."""
+    text = ("Harbour Dental Ltd\nProfit and Loss by Month\nApril 2025 - May 2025\n\n"
+            ',Apr 2025,May 2025,Total\nIncome\nPrivate treatment income,"34,200.00","35,000.00","69,200.00"\n'
+            'Total Income,"34,200.00","35,000.00","69,200.00"\nCost of Sales\nAssociate dentists,"9,000.00","9,000.00",'
+            '"18,000.00"\nGross Profit,"25,200.00","26,000.00","51,200.00"\nExpenses\nWages and salaries,"14,200.00",'
+            '"14,200.00","28,400.00"\nNet Income,"11,000.00","11,800.00","22,800.00"\n')
+    parsed = importer.parse(text)
+    assert parsed["layout"] == "pnl_by_month" and parsed["months"] == ["2025-04", "2025-05"]
+    assert [r["name"] for r in parsed["rows"]] == ["Private treatment income", "Associate dentists", "Wages and salaries"]
+    from fpa import onboard
+    pv = onboard.preview(text)            # the report's own section headings guide the suggestion
+    assert [(a["section"], a["line"]) for a in pv["accounts"]] == [("revenue", "Private treatment income"),
+                                                                    ("cost_of_sales", "Direct costs"),
+                                                                    ("opex", "Staff costs")]
+
+
 def test_unknown_accounts_are_named(bw):
     text = "Account Code,Account,Debit,Credit\n999,Mystery account,10,\n200,Sales,,10\n"
     with pytest.raises(importer.ImportError_, match="999 Mystery account"):

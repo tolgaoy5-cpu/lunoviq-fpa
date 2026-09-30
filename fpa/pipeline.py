@@ -14,6 +14,7 @@ from pathlib import Path
 import openpyxl
 
 from . import company, workbook
+from .forecast import load_le
 
 OUTPUT = company.ROOT / "output"
 STEPS = ["actuals", "workbook", "recalc", "audit"]
@@ -72,8 +73,10 @@ def summary(co, lay, audit_result, files, root=None):
     from .budget import build as budget_build
     bud = budget_build(co, root=root)
     return {
-        "company": co.name, "slug": co.slug, "model": co.model, "month": res["month"], "fy": co.fy_label(),
+        "company": co.name, "slug": co.slug, "model": co.model, "demo": bool(co.cfg["company"].get("demo")),
+        "month": res["month"], "fy": co.fy_label(),
         "forecast_label": fc["label"], "has_cost_of_sales": co.chart.has_cost_of_sales,
+        "reporting": co.cfg.get("reporting", {}),
         "chart_lines": [{"line": l, "section": s} for l, s in co.chart.lines("revenue", "cost_of_sales", "opex")],
         "generated": dt.datetime.now().isoformat(timespec="seconds"),
         "totals": {p: {k: v for k, v in res["totals"][p].items()} for p in ("month", "ytd")},
@@ -93,11 +96,13 @@ def summary(co, lay, audit_result, files, root=None):
                       "closing_pum": {n: r.get("closing_pum") for n, r in sc.items()},
                       "budget_closing_pum": fc.get("budget_closing_pum")},
         "assumptions": fc["assumptions"],
+        "assumption_notes": fc.get("assumption_notes") or load_le(co).get("latest_estimate", {}).get("notes", {}),
         "cash": {"weeks": [w0.isoformat() for w0, _ in cf["weeks"]], "receipts": cf["receipts"],
                  "payments": cf["payments"], "closing": cf["closing"], "opening": cf["opening"],
                  "minimum": cf["minimum"], "lowest": cf["lowest"], "lowest_week": cf["lowest_week"],
                  "lines": {"%s|%s" % k: v for k, v in cf["table"].items()},
-                 "corporation_tax": {**cf["corporation_tax"], "due": cf["corporation_tax"]["due"].isoformat()}},
+                 "corporation_tax": {**cf["corporation_tax"], "due": cf["corporation_tax"]["due"].isoformat()},
+                 "dividends": co.cfg["cash"].get("dividends", [])},
         "audit": audit_result, "files": files,
     }
 

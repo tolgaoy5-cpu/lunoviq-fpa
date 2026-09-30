@@ -28,7 +28,14 @@ Audit: 409 values checked, 0 mismatches, 0 Excel errors; model checks OK
 
 ![Web panel: September 2026 pack overview](docs/screenshot_overview.png)
 
-The company, **Kestrel Row Lettings Ltd**, is fictional: a UK letting and property-management agent with about 420 managed properties, 18 staff and £1.3m of revenue. All data is synthetic and reproducible, with a seeded simulator. See [the design notes](docs/DESIGN.md).
+**It works for any company.** Upload last year's P&L by month from Xero, QuickBooks, Sage or another system. The wizard suggests how each account maps into the management P&L; you confirm it; and from then on each month's trial balance export produces the pack. Two fictional demo companies are included:
+
+| Demo company | Budget | Data |
+|---|---|---|
+| **Kestrel Row Lettings Ltd**: letting agent, ~420 managed properties, £1.3m revenue | Driver-based (properties, rent, lets, headcount) | Seeded simulator |
+| **Brightwell Cleaning Services Ltd**: commercial and domestic cleaning, £0.85m revenue | Rule-based from last year's actuals (growth, % of sales, fixed) | Xero-style exports (P&L by month, year-to-date trial balances with the balance sheet) imported through the importer |
+
+All data is synthetic and reproducible. See [the design notes](docs/DESIGN.md).
 
 ## What it does
 
@@ -70,6 +77,29 @@ The company, **Kestrel Row Lettings Ltd**, is fictional: a UK letting and proper
 
 ![Variance tab: budget vs actual, commentary and driver bridges](docs/screenshot_variance.png)
 
+## Any company: importer and rule-based budget
+
+- **Importer** (`fpa/importer.py`). It reads trial balances (debit/credit or signed balance, monthly or year to date) and P&L-by-month reports as accounting systems export them:
+  - title lines above the table,
+  - codes or names only,
+  - comma, semicolon or tab delimiters,
+  - `£1,234.56` and `(1,234.56)`,
+  - section headings and subtotals.
+
+  Nothing is stored unless every account is in the chart and the P&L reconciles to the file to the penny.
+- **Rule-based budget** (`fpa/rules.py`). Each account uses one rule:
+  - growth on last year's month (keeps seasonality),
+  - % of sales,
+  - fixed,
+  - prior year,
+  - manual,
+  - tax on profit.
+
+  The Excel Budget sheet carries the rules as live formulas.
+- **Flexed budget.** For costs budgeted as a share of sales, the variance is split into sales volume and cost share. For Brightwell this finds that cleaners' pay rose to 54.1% of sales against 52.0% budgeted (−£9.1k), which the drop in sales (+£6.8k) had largely hidden.
+
+![Brightwell: variance with cost of sales and the flexed budget](docs/screenshot_brightwell_variance.png)
+
 ## The September 2026 story (synthetic)
 
 The simulated first half of FY2026/27 contains events that the analysis has to find and explain:
@@ -104,13 +134,14 @@ The pack has eleven sheets: Cover, Dashboard, BvA, Forecast, Scenarios, Cash13W,
 
 ```bash
 pip install -r requirements.txt
-python -m fpa run --month 2026-09        # build, recalculate and audit the September pack
+python -m fpa run --month 2026-09        # build, recalculate and audit the September pack (Kestrel Row)
+python -m fpa run --company brightwell-cleaning --month 2026-09
 python -m fpa serve                      # web panel at http://127.0.0.1:8766
 python -m fpa simulate                   # regenerate the synthetic actuals
 ```
 
 **Monthly workflow in the web panel:**
-1. **Load actuals.** Upload the month's trial balance and KPI CSVs. Sample October files can be downloaded from the upload page.
+1. **Load actuals.** Upload the month's trial balance export (Kestrel: trial balance and KPI files). Sample October files can be downloaded from the upload page.
 2. **Build the pack.**
 3. **Review** the Overview, Variance, Forecast and Cash tabs.
 4. **Open or download** the Excel pack.
@@ -120,7 +151,7 @@ Recalculation needs Microsoft Excel (macOS or Windows). Without it, use `--no-re
 ## Tests
 
 ```bash
-python -m pytest                     # fast (37 tests)
+python -m pytest                     # fast (56 tests)
 RUN_EXCEL_TESTS=1 python -m pytest   # adds the Excel recalculation and audit tests
 ```
 
@@ -139,8 +170,12 @@ The tests cover:
 
 ```
 fpa/
-  company.py     company definition and financial-year calendar
-  accounts.py    chart of accounts and P&L subtotals
+  company.py     company workspaces and financial-year calendar
+  accounts.py    chart of accounts (sections, lines, cash classes) and P&L subtotals
+  importer.py    accounting-system exports -> stored monthly actuals
+  onboard.py     add a company from its P&L by month (web wizard)
+  rules.py       rule-based budget and run-rate forecast (any company)
+  demo_brightwell.py  Xero-style demo exports for Brightwell Cleaning
   drivers.py     driver engine shared by budget, forecast and simulator
   ledger.py      trial balance / KPI exports: read, validate, write
   simulate.py    synthetic actuals with business events (seeded)
@@ -152,8 +187,8 @@ fpa/
   recalc.py      Excel recalculation (sandbox-safe, timeout)
   pipeline.py    monthly run: build, recalculate, audit, summary.json
   web/           local web panel (server.py + static/)
-config/          company and budget drivers, latest estimate, analyst notes
-data/actuals/    monthly ledger exports (synthetic)
+companies/       one folder per company: company.toml, accounts.csv, forecast.toml,
+                 commentary.toml, actuals/ (and imports/ for Brightwell's raw exports)
 tests/           pytest suite
 docs/            design notes, change log, screenshots
 ```

@@ -228,3 +228,28 @@ The user asked for the system to work for any company, with the example company 
   - The pack audits clean first time: 463 values, 0 mismatches, checks OK.
 - **Regression:** Kestrel budget, BvA, bridges, commentary, forecast and cash are unchanged (snapshot tests).
 - **Tests:** 58 passed, including Excel.
+
+## 2026-09-30: Web panel for any company: switcher, set-up wizard, export uploads
+
+- **Company switcher** in the top bar. The choice is remembered per browser, and `?company=<slug>` opens a company directly.
+- **Add company wizard** (`fpa/onboard.py`, `POST /api/companies/preview`, `POST /api/companies`):
+  1. Upload last year's Profit and Loss by month.
+  2. Every account gets a suggested section and report line. The suggestions come from:
+     - unambiguous names first (depreciation, interest, corporation tax),
+     - then the report's own section headings (e.g. "Cost of Sales"),
+     - then keyword rules.
+
+     The user can change any of them.
+  3. Growth rates, opening cash and the minimum cash buffer are entered.
+  4. The company is created with a rule-based budget, materiality thresholds scaled to its size, cash defaults and forecast scenarios, and its history is imported. Nothing half-made is left if the import fails.
+- **Monthly upload for rule-based companies:** a single accounting-system export, with the basis auto-detected or chosen (month / year to date). The result reports the basis, whether debits equal credits, and the accounts matched. A synthetic next-month trial balance is available for the Brightwell demo.
+- **Generic views:**
+  - Variance: cost of sales, gross profit and margin; the flexed-budget card (sales volume / cost share); the company's own materiality thresholds.
+  - Overview: a gross-margin tile.
+  - Forecast: labelled assumptions with notes.
+  - Cash: a warning with the company's own dividends.
+- **Importer fixes found in browser QA:**
+  - QuickBooks-style reports with an empty header over the account column are now read.
+  - Report section headings guide the suggestions, so costs under "Cost of Sales" are classed as cost of sales.
+- **Output:** packs are stored per company in `output/<slug>/`.
+- **Tests:** 62 passed, including Excel, and 13 web tests (wizard, export upload, validation).

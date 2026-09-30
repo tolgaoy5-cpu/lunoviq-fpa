@@ -105,9 +105,14 @@ def parse(text):
     for hi, raw in enumerate(rows[:15]):
         header = [_norm(h) for h in raw]
         code_i, name_i = _find(header, CODE), _find(header, NAME)
-        if code_i is None and name_i is None:
-            continue
         month_cols = [(i, month_of(raw[i])) for i in range(len(raw)) if month_of(raw[i])]
+        if code_i is None and name_i is None:
+            if len(month_cols) < 2:
+                continue
+            # P&L by month with an unnamed account column (e.g. QuickBooks): the first non-month column
+            name_i = next((i for i in range(len(raw)) if i not in {c for c, _ in month_cols}), None)
+            if name_i is None:
+                continue
         sfx = ("", " ytd", " year to date", " month", " period", " this month")
         dr_i = _find(header, tuple(d + x for d in DEBIT for x in sfx))
         cr_i = _find(header, tuple(c + x for c in CREDIT for x in sfx))
@@ -120,6 +125,7 @@ def parse(text):
         else:
             continue
         out = []
+        heading = ""                               # the report section the rows sit under (e.g. "Cost of Sales")
         for n, r in enumerate(rows[hi + 1:], start=hi + 2):
             if not any(c.strip() for c in r):
                 continue
@@ -132,7 +138,7 @@ def parse(text):
             low = (name or code).lower()
             if not code and (not name or low.startswith(("total", "net ", "gross", "operating profit", "profit"))):
                 continue                           # section titles and report subtotals
-            item = {"line": n, "code": code, "name": name, "type": get(type_i)}
+            item = {"line": n, "code": code, "name": name, "type": get(type_i) or heading}
             try:
                 if layout == "pnl_by_month":
                     item["months"] = {mo: amount(get(i)) for i, mo in month_cols}
@@ -145,7 +151,8 @@ def parse(text):
                 raise ImportError_("line %d: %s" % (n, e)) from None
             vals = list(item.get("months", {}).values()) + [item.get("debit", 0.0), item.get("credit", 0.0)]
             if not code and not any(vals):
-                continue                           # section headings (e.g. "Revenue") carry no amounts
+                heading = name                     # section headings (e.g. "Revenue") carry no amounts
+                continue
             out.append(item)
         if not out:
             raise ImportError_("no account rows found under the header on line %d" % (hi + 1))
@@ -289,23 +296,21 @@ def suggest_section(item):
     t = (item.get("type") or "").lower()
     name = (item.get("name") or "").lower()
     code = item.get("code") or ""
-    by_type = [("revenue", ("revenue", "sales", "income", "other income")),
-               ("cost_of_sales", ("direct cost", "cost of sales", "cogs", "direct costs")),
-               ("depreciation", ("depreciation",)),
+    # unambiguous names first: reports often list these under "Operating Expenses"
+    if any(k in name for k in ("corporation tax", "income tax expense")):
+        return "tax"
+    if any(k in name for k in ("interest paid", "interest expense", "loan interest", "bank interest paid")):
+        return "interest"
+    if "depreciation" in name or "amortisation" in name or "amortization" in name:
+        return "depreciation"
+    by_type = [("cost_of_sales", ("direct cost", "cost of sales", "cogs", "direct costs", "cost of goods")),
+               ("revenue", ("revenue", "sales", "income", "other income", "turnover")),
                ("opex", ("expense", "overhead", "overheads")),
                ("balance_sheet", ("asset", "liability", "liabilities", "equity", "bank", "current", "fixed",
                                   "non-current", "inventory", "prepayment"))]
     for sec, keys in by_type:
         if any(k in t for k in keys):
-            if sec == "opex" and "depreciation" in name:
-                return "depreciation"
             return sec
-    if any(k in name for k in ("corporation tax", "income tax expense")):
-        return "tax"
-    if any(k in name for k in ("interest paid", "interest expense", "loan interest")):
-        return "interest"
-    if "depreciation" in name or "amortisation" in name:
-        return "depreciation"
     if any(k in name for k in ("sales", "revenue", "income", "fees received", "turnover")):
         return "revenue"
     if any(k in name for k in ("cost of sales", "materials", "subcontract", "purchases", "direct wages")):

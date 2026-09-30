@@ -11,7 +11,11 @@ API (company = folder name under companies/, default kestrel-row)
     GET  /api/summary?company=<c>&run=<dir>    summary of a previous pack
     GET  /api/download?company=<c>&run=<dir>   the Excel pack
     POST /api/open {company, run}     open the pack in Excel (macOS)
-    POST /api/upload {company, month, trial_balance, kpis, replace}   add a month of actuals (CSV text)
+    POST /api/upload {company, month, trial_balance, kpis, replace}   add a month of actuals (CSV text);
+                                      for rule-based companies: {company, month, file, basis, replace},
+                                      any accounting-system export (fpa/importer.py)
+    POST /api/companies/preview {text}                  suggested chart from a P&L-by-month export
+    POST /api/companies {name, accounts, history, ...}  create a company (fpa/onboard.py)
     GET  /api/sample?month=<m>&file=trial_balance|kpis        synthetic export for a demo upload
     POST /api/quit                    stop the server
 """
@@ -126,11 +130,13 @@ def app_state(slug=None):
     companies = []
     for s in company.available(state["companies"]):
         c = company.load(s, state["companies"])
-        companies.append({"slug": s, "name": c.name, "model": c.model,
+        companies.append({"slug": s, "name": c.name, "model": c.model, "demo": bool(c.cfg["company"].get("demo")),
                           "description": c.cfg["company"].get("description", "")})
-    return {"slug": co.slug, "company": co.name, "model": co.model, "fy": co.fy_label(), "fy_months": fy,
+    return {"slug": co.slug, "company": co.name, "model": co.model, "demo": bool(co.cfg["company"].get("demo")),
+            "description": co.cfg["company"].get("description", ""), "fy": co.fy_label(), "fy_months": fy,
             "closed": closed, "next_month": nxt if nxt in fy else None, "runs": runs(co.slug),
-            "companies": companies, "sample": co.model == "lettings"}
+            "companies": companies, "sample": co.model == "lettings" or co.slug == "brightwell-cleaning",
+            "upload": "native" if co.model == "lettings" else "export"}
 
 
 def upload(body):
@@ -143,12 +149,14 @@ def upload(body):
         return {"error": str(e)}, 404
     if month not in co.fy_months():
         return {"error": "%s is outside %s." % (month, co.fy_label())}, 400
+    have = ledger.available_months(co)
+    if co.model != "lettings":
+        return upload_export(co, month, body, have)
     tb, kp = body.get("trial_balance") or "", body.get("kpis") or ""
     if not tb.strip() or not kp.strip():
         return {"error": "Both files are needed: the trial balance and the KPIs."}, 400
     if len(tb) + len(kp) > MAX_UPLOAD:
         return {"error": "The files are too large."}, 413
-    have = ledger.available_months(co)
     if month in have and not body.get("replace"):
         return {"error": "Actuals for %s already exist. Replace them?" % month, "exists": True}, 409
     earlier = [m for m in co.fy_months() if m < month and m not in have]
@@ -175,6 +183,56 @@ def upload(body):
         shutil.copytree(d, dest)
     t = co.chart.totals(p)
     return {"ok": True, "month": month, "revenue": t["revenue"], "ebitda": t["ebitda"]}, 200
+
+
+def upload_export(co, month, body, have):
+    """A month from an accounting-system export (trial balance or P&L), checked before it is stored."""
+    from .. import importer
+    text = body.get("file") or ""
+    if not text.strip():
+        return {"error": "Choose the export file."}, 400
+    if len(text) > MAX_UPLOAD:
+        return {"error": "The file is too large."}, 413
+    if month in have and not body.get("replace"):
+        return {"error": "Actuals for %s already exist. Replace them?" % month, "exists": True}, 409
+    earlier = [m for m in co.fy_months() if m < month and m not in have]
+    if earlier:
+        return {"error": "Load the earlier months first: %s." % ", ".join(earlier)}, 400
+    basis = body.get("basis") or "auto"
+    if basis not in ("auto", "month", "ytd"):
+        return {"error": "Unknown basis."}, 400
+    try:
+        pnl, info = importer.import_month(co, month, text, basis=basis, save=False)
+    except (importer.ImportError_, ledger.LedgerError, ValueError) as e:
+        return {"error": "The file was not accepted: %s" % e}, 400
+    ledger.write_month(co, month, pnl)
+    t = co.chart.totals(pnl)
+    return {"ok": True, "month": month, "revenue": t["revenue"], "ebitda": t["ebitda"], "info": info}, 200
+
+
+def create_company(body):
+    from .. import onboard
+    name = str(body.get("name", "")).strip()
+    if not 2 <= len(name) <= 80:
+        return {"error": "Enter the company name."}, 400
+    try:
+        fy = int(body.get("fy_start_month") or 4)
+        rg, cg = float(body.get("revenue_growth", 0.05)), float(body.get("cost_growth", 0.03))
+        ob, mb = float(body.get("opening_balance") or 0), float(body.get("minimum_balance") or 0)
+    except (TypeError, ValueError):
+        return {"error": "Check the numbers in the form."}, 400
+    if not 1 <= fy <= 12 or not -0.5 <= rg <= 1 or not -0.5 <= cg <= 1:
+        return {"error": "Check the financial year and the growth rates."}, 400
+    accounts = body.get("accounts") or []
+    if not accounts:
+        return {"error": "Confirm the accounts first."}, 400
+    try:
+        co = onboard.create(name, accounts, body.get("history") or "", fy_start_month=fy, revenue_growth=rg,
+                            cost_growth=cg, opening_balance=ob, minimum_balance=mb,
+                            description=str(body.get("description", ""))[:200], root=state["companies"] and Path(state["companies"]))
+    except (ValueError, KeyError) as e:
+        return {"error": str(e)}, 400
+    return {"ok": True, "slug": co.slug}, 201
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -226,13 +284,19 @@ class Handler(BaseHTTPRequestHandler):
                 co = get_company(q.get("company"))
             except LookupError:
                 return self._json({"error": "Unknown sample."}, 404)
-            if co.model != "lettings" or month not in co.fy_months() or which not in ("trial_balance", "kpis"):
+            if month not in co.fy_months() or which not in ("trial_balance", "kpis"):
                 return self._json({"error": "Unknown sample."}, 404)
-            from ..simulate import simulate
-            with tempfile.TemporaryDirectory() as tmp:
-                data = simulate(co, last=month)
-                ledger.write_month(co, month, *data[month], root=tmp)
-                body = (Path(tmp) / month / ("%s.csv" % which)).read_bytes()
+            if co.model == "lettings":
+                from ..simulate import simulate
+                with tempfile.TemporaryDirectory() as tmp:
+                    data = simulate(co, last=month)
+                    ledger.write_month(co, month, *data[month], root=tmp)
+                    body = (Path(tmp) / month / ("%s.csv" % which)).read_bytes()
+            elif co.slug == "brightwell-cleaning" and which == "trial_balance":
+                from .. import demo_brightwell
+                body = demo_brightwell.sample_trial_balance(co, month).encode()
+            else:
+                return self._json({"error": "Unknown sample."}, 404)
             self.send_response(200)
             self.send_header("Content-Type", "text/csv; charset=utf-8")
             self.send_header("Content-Disposition", 'attachment; filename="%s_%s.csv"' % (month, which))
@@ -291,6 +355,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"job": job_id}, 202)
         if u.path == "/api/upload":
             res, code = upload(body)
+            return self._json(res, code)
+        if u.path == "/api/companies/preview":
+            from .. import onboard, importer
+            text = body.get("text") or ""
+            if not text.strip() or len(text) > MAX_UPLOAD:
+                return self._json({"error": "Choose the export file."}, 400)
+            try:
+                return self._json(onboard.preview(text))
+            except importer.ImportError_ as e:
+                return self._json({"error": "The file could not be read: %s" % e}, 400)
+        if u.path == "/api/companies":
+            res, code = create_company(body)
             return self._json(res, code)
         if u.path == "/api/open":
             p = run_path(body.get("company"), body.get("run"))

@@ -33,11 +33,11 @@ S_CARPET = [1.25, 1.15, 1.0, 0.85, 0.8, 0.95, 1.0, 1.05, 0.7, 0.9, 1.1, 1.3]
 S_UTIL = [0.85, 0.75, 0.7, 0.7, 0.7, 0.8, 1.0, 1.2, 1.35, 1.4, 1.3, 1.25]
 
 
-def _true_pnl(co):
-    """{month: {code: amount}} from April 2025 to the last closed month."""
+def _true_pnl(co, last=None):
+    """{month: {code: amount}} from April 2025 to the last closed month (or `last`)."""
     rng = random.Random(SEED)
     n = lambda s=0.03: rng.gauss(1.0, s)
-    months = company.month_range(co.cfg["company"]["first_actual_month"], co.cfg["company"]["last_closed_month"])
+    months = company.month_range(co.cfg["company"]["first_actual_month"], last or co.cfg["company"]["last_closed_month"])
     out = {}
     for i, m in enumerate(months):
         fm = co.month_index(m) - 1
@@ -143,6 +143,19 @@ def trial_balance_export(co, pnl, month, rng):
     rows += [[l[0], l[1], l[2], fmt(l[3]), fmt(l[4])] for l in lines]
     rows.append(["", "Total", "", fmt(sum(l[3] for l in lines)), fmt(sum(l[4] for l in lines))])
     return _csv(rows)
+
+
+def sample_trial_balance(co, month):
+    """The year-to-date trial balance export for `month` (for demo uploads of the next month)."""
+    pnl = _true_pnl(co, last=month)
+    rng = random.Random(SEED + 7)
+    text = None
+    for m in co.fy_months():
+        if m in pnl:
+            text = trial_balance_export(co, pnl, m, rng)
+        if m == month:
+            break
+    return text
 
 
 def build(co=None, write_actuals=True):

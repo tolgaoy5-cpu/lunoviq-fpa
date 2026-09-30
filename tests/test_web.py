@@ -158,3 +158,44 @@ def test_quit_refuses_while_busy(base):
     code, res = call(url + "/api/quit", {})
     assert code == 409 and res["busy"]
     del server.JOBS["busy"]
+
+
+# ---------------------------------------------------------------- any company
+def test_rules_company_state_and_sample(base):
+    url, _ = base
+    code, s = call(url + "/api/state?company=brightwell-cleaning")
+    assert code == 200 and s["model"] == "rules" and s["upload"] == "export" and s["next_month"] == "2026-10"
+    code, raw = call(url + "/api/sample?company=brightwell-cleaning&month=2026-10&file=trial_balance")
+    assert code == 200 and raw.startswith(b"Trial Balance")
+
+
+def test_export_upload_for_a_rules_company(base):
+    url, _ = base
+    _, tb = call(url + "/api/sample?company=brightwell-cleaning&month=2026-10&file=trial_balance")
+    tb = tb.decode()
+    bad = tb.replace("200,Sales - Commercial contracts", "299,Sales - Unknown line")
+    code, res = call(url + "/api/upload", {"company": "brightwell-cleaning", "month": "2026-10", "file": bad})
+    assert code == 400 and "299 Sales - Unknown line" in res["error"]
+    code, res = call(url + "/api/upload", {"company": "brightwell-cleaning", "month": "2026-10", "file": tb})
+    assert code == 200 and res["info"]["basis"] == "ytd" and res["info"]["balanced"] is True
+    from fpa import demo_brightwell
+    true = demo_brightwell._true_pnl(company.load("brightwell-cleaning"), last="2026-10")["2026-10"]
+    assert res["revenue"] == pytest.approx(sum(true[c] for c in ("200", "201", "202", "203")), abs=0.01)
+    assert call(url + "/api/upload", {"company": "brightwell-cleaning", "month": "2026-10", "file": tb})[0] == 409
+
+
+def test_add_company_wizard(base):
+    url, _ = base
+    hist = (company.COMPANIES / "brightwell-cleaning" / "imports" / "pnl_by_month_FY2025-26.csv").read_text()
+    code, pv = call(url + "/api/companies/preview", {"text": hist})
+    assert code == 200 and pv["layout"] == "pnl_by_month" and len(pv["months"]) == 12
+    sections = {a["code"]: a["section"] for a in pv["accounts"]}
+    assert sections["200"] == "revenue" and sections["310"] == "cost_of_sales" and sections["416"] == "depreciation"
+    body = {"name": "Harbour Test Cleaning Ltd", "fy_start_month": 4, "revenue_growth": 0.04, "cost_growth": 0.03,
+            "opening_balance": 20000, "accounts": pv["accounts"], "history": hist}
+    code, res = call(url + "/api/companies", body)
+    assert code == 201 and res["slug"] == "harbour-test-cleaning"
+    code, s = call(url + "/api/state?company=harbour-test-cleaning")
+    assert s["closed"] == [] and s["next_month"] == "2026-04" and s["fy"] == "FY2026/27"
+    assert call(url + "/api/companies", body)[0] == 400                          # already exists
+    assert call(url + "/api/companies/preview", {"text": "no,table,here"})[0] == 400

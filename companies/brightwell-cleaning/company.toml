@@ -5,6 +5,7 @@
 name = "Brightwell Cleaning Services Ltd"
 model = "rules"
 description = "Commercial and domestic cleaning, about 45 cleaners"
+demo = true                            # fictional company with synthetic data
 currency = "GBP"
 fy_start_month = 4
 budget_year = 2026
