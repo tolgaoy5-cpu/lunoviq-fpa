@@ -17,7 +17,7 @@ The events give the variance analysis real stories to explain:
   - July: a portfolio landlord sells 24 properties                   -> adverse management fees
   - August: a property portal raises its price by 15%                -> adverse marketing
 
-Usage:  python -m fpa.simulate            (writes data/actuals/<month>/)
+Usage:  python -m fpa.simulate            (writes companies/kestrel-row/actuals/<month>/)
 """
 import copy
 import random
@@ -89,12 +89,12 @@ def simulate(co=None, last=None, seed=SEED):
 
 
 def main():
-    co = company.load()
+    co = company.load("kestrel-row")
     data = simulate(co)
     for month, (p, k) in data.items():
-        ledger.write_month(month, p, k)
+        ledger.write_month(co, month, p, k)
     print("Wrote %d months of actuals (%s to %s) to %s"
-          % (len(data), min(data), max(data), ledger.ACTUALS))
+          % (len(data), min(data), max(data), co.actuals_dir))
 
 
 if __name__ == "__main__":

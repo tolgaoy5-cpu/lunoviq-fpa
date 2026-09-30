@@ -5,17 +5,17 @@ management P&L line, with materiality flags, driver bridges and commentary.
 Sign convention: a variance is FAVOURABLE when positive (revenue above budget,
 costs below budget).
 
-Driver bridges split the largest variances into their causes:
+For the lettings template, driver bridges split the largest variances into causes:
   management fees   volume (properties) / rate (average rent) / other (collection, fee)
   let-only fees     volume (lets) / rate (rent) / other
   set-up fees       volume (re-lets) / other
   staff costs       headcount / other (pay, NI, commission)
 Commentary combines generated text (the numbers) with analyst notes from
-config/commentary.toml (the business reasons).
+companies/<slug>/commentary.toml (the business reasons).
 """
 import tomllib
 
-from . import accounts, budget, company, ledger
+from . import budget, ledger
 
 STAFF = ("5000", "5010", "5020", "5030")
 
@@ -24,8 +24,7 @@ class ReportError(ValueError):
     pass
 
 
-def _fav(code_or_kind, actual, budget_):
-    kind = code_or_kind if code_or_kind in ("revenue", "expense") else accounts.BY_CODE[code_or_kind].kind
+def _fav(kind, actual, budget_):
     return actual - budget_ if kind == "revenue" else budget_ - actual
 
 
@@ -36,8 +35,8 @@ def _line(label, kind, a, b, abs_t, pct_t):
             "flag": abs(var) >= abs_t and abs(pct) >= pct_t}
 
 
-def load_notes(path=None):
-    p = path or (company.ROOT / "config" / "commentary.toml")
+def load_notes(co):
+    p = co.commentary_path
     if not p.exists():
         return {}
     with open(p, "rb") as f:
@@ -108,46 +107,66 @@ def analyse(co, month, root=None, notes=None):
     fy = co.fy_months()
     if month not in fy:
         raise ReportError("%s is not in %s" % (month, co.fy_label()))
-    avail = set(ledger.available_months(root))
+    avail = set(ledger.available_months(co, root))
     ytd = [m for m in fy if m <= month]
     missing = [m for m in ytd if m not in avail]
     if missing:
         raise ReportError("actuals missing for %s" % ", ".join(missing))
-    b = budget.build(co)
-    bmonths = {d["month"]: dict(d, pnl=b["pnl"][d["month"]]) for d in b["drivers"]}
+    b = budget.build(co, root=root)
+    lettings = co.model == "lettings"
+    if lettings:
+        bmonths = {d["month"]: dict(d, pnl=b["pnl"][d["month"]]) for d in b["drivers"]}
+    else:
+        bmonths = {m: {"pnl": b["pnl"][m]} for m in fy}
     act = {}
     for m in ytd:
-        p, k = ledger.read_month(m, root)
+        p, k = ledger.read_month(co, m, root)
         act[m] = {"pnl": p, "kpis": k}
     rep = co.cfg["reporting"]
-    notes = load_notes() if notes is None else notes
+    notes = load_notes(co) if notes is None else notes
+    chart = co.chart
 
     def agg(src, months, code):
         return sum(src[m]["pnl"][code] for m in months)
 
     lines = {"month": {}, "ytd": {}}
-    for code, acc in accounts.BY_CODE.items():
+    for code, acc in chart.by_code.items():
         lines["month"][code] = _line(acc.name, acc.kind, act[month]["pnl"][code], bmonths[month]["pnl"][code],
                                      rep["month_abs"], rep["month_pct"])
         lines["ytd"][code] = _line(acc.name, acc.kind, agg(act, ytd, code), agg(bmonths, ytd, code),
                                    rep["ytd_abs"], rep["ytd_pct"])
     totals = {}
     for period, months in (("month", [month]), ("ytd", ytd)):
-        a_t = accounts.totals({c: agg(act, months, c) for c in accounts.BY_CODE})
-        b_t = accounts.totals({c: agg(bmonths, months, c) for c in accounts.BY_CODE})
-        a_g = accounts.by_group({c: agg(act, months, c) for c in accounts.BY_CODE})
-        b_g = accounts.by_group({c: agg(bmonths, months, c) for c in accounts.BY_CODE})
+        a_p = {c: agg(act, months, c) for c in chart.by_code}
+        b_p = {c: agg(bmonths, months, c) for c in chart.by_code}
+        a_t, b_t = chart.totals(a_p), chart.totals(b_p)
+        a_g, b_g = chart.by_line(a_p), chart.by_line(b_p)
         abs_t, pct_t = (rep["month_abs"], rep["month_pct"]) if period == "month" else (rep["ytd_abs"], rep["ytd_pct"])
         t = {}
-        for g in accounts.GROUPS:
-            kind = "revenue" if g in ("Management fees", "New business fees", "Other fee income") else "expense"
-            t[g] = _line(g, kind, a_g[g], b_g[g], abs_t, pct_t)
-        for key, label, kind in (("revenue", "Total revenue", "revenue"), ("opex", "Total operating costs", "expense"),
-                                 ("ebitda", "EBITDA", "revenue"), ("net_income", "Net income", "revenue")):
+        for g, section in chart.lines("revenue", "cost_of_sales", "opex"):
+            t[g] = _line(g, "revenue" if section == "revenue" else "expense", a_g[g], b_g[g], abs_t, pct_t)
+        keys = [("revenue", "Total revenue", "revenue")]
+        if chart.has_cost_of_sales:
+            keys += [("cost_of_sales", "Total cost of sales", "expense"), ("gross_profit", "Gross profit", "revenue")]
+        keys += [("opex", "Total operating costs", "expense"), ("ebitda", "EBITDA", "revenue"),
+                 ("net_income", "Net income", "revenue")]
+        for key, label, kind in keys:
             t[key] = _line(label, kind, a_t[key], b_t[key], abs_t, pct_t)
         t["margin"] = {"actual": a_t["ebitda"] / a_t["revenue"] if a_t["revenue"] else 0.0,
                        "budget": b_t["ebitda"] / b_t["revenue"] if b_t["revenue"] else 0.0}
+        if chart.has_cost_of_sales:
+            t["gp_margin"] = {"actual": a_t["gross_profit"] / a_t["revenue"] if a_t["revenue"] else 0.0,
+                              "budget": b_t["gross_profit"] / b_t["revenue"] if b_t["revenue"] else 0.0}
         totals[period] = t
+
+    if not lettings:
+        kp = act[month]["kpis"]
+        res = {"month": month, "ytd_months": ytd, "fy": co.fy_label(), "company": co.name, "model": co.model,
+               "lines": lines, "totals": totals, "bridges": {"month": {}, "ytd": {}},
+               "kpis": [(k.replace("_", " ").capitalize(), v, None, "number") for k, v in kp.items()],
+               "ytd_kpis": [], "actuals": act, "budget": bmonths, "chart": chart}
+        res["commentary"] = commentary(res, notes)
+        return res
 
     bridges = {"month": _bridges(bmonths[month], act[month], co),
                "ytd": _sum_bridges([_bridges(bmonths[m], act[m], co) for m in ytd])}
@@ -168,9 +187,9 @@ def analyse(co, month, root=None, notes=None):
         ("Properties gained", sum(act[m]["kpis"]["gained"] for m in ytd), sum(bmonths[m]["gained"] for m in ytd)),
         ("Properties lost", sum(act[m]["kpis"]["lost"] for m in ytd), sum(bmonths[m]["lost"] for m in ytd)),
     ]
-    res = {"month": month, "ytd_months": ytd, "fy": co.fy_label(), "company": co.name,
+    res = {"month": month, "ytd_months": ytd, "fy": co.fy_label(), "company": co.name, "model": co.model,
            "lines": lines, "totals": totals, "bridges": bridges, "kpis": kpis, "ytd_kpis": ytd_kpis,
-           "actuals": act, "budget": bmonths}
+           "actuals": act, "budget": bmonths, "chart": chart}
     res["commentary"] = commentary(res, notes)
     return res
 
@@ -213,14 +232,17 @@ def commentary(res, notes):
                      _k(t["ebitda"]["var"]), "above" if t["ebitda"]["var"] >= 0 else "below",
                      _k(t["ebitda"]["actual"]), t["margin"]["actual"] * 100, t["margin"]["budget"] * 100),
                   t["ebitda"]["var"] >= 0)]
-        facts = _facts(res, period)
+        lettings = res["model"] == "lettings"
+        facts = _facts(res, period) if lettings else {}
+        bridge_accounts = BRIDGE_ACCOUNTS if lettings else {}
+        tax = set(res["chart"].codes("tax"))
         note_months = [res["month"]] if period == "month" else res["ytd_months"]
-        flagged = sorted((c for c, l in res["lines"][period].items() if l["flag"] and c != "9000"),
+        flagged = sorted((c for c, l in res["lines"][period].items() if l["flag"] and c not in tax),
                          key=lambda c: -abs(res["lines"][period][c]["var"]))
         done_bridges = set()
         for code in flagged:
             l = res["lines"][period][code]
-            bridge = next((n for n, codes in BRIDGE_ACCOUNTS.items() if code in codes), None)
+            bridge = next((n for n, codes in bridge_accounts.items() if code in codes), None)
             label = bridge if bridge in ("Staff costs",) else l["label"]
             if bridge and bridge in done_bridges:
                 continue
@@ -234,7 +256,7 @@ def commentary(res, notes):
                 detail = _bridge_text(bridge, res["bridges"][period][bridge], facts[bridge])
                 if detail:
                     text += ": " + detail
-            codes = BRIDGE_ACCOUNTS.get(bridge, [code])
+            codes = bridge_accounts.get(bridge, [code])
             reasons = []
             for m in note_months:
                 for c in codes:

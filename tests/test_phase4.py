@@ -2,7 +2,7 @@
 import openpyxl
 import pytest
 
-from fpa import accounts, company, forecast, ledger, workbook
+from fpa import company, forecast, ledger, workbook
 
 CO = company.load()
 
@@ -16,10 +16,10 @@ def test_reforecast_combines_actuals_and_forecast(sc):
     fc = sc["base"]
     assert fc["label"] == "6+6" and len(fc["closed"]) == 6 and len(fc["open"]) == 6
     for m in fc["closed"]:
-        assert fc["pnl"][m] == ledger.read_month(m)[0]
+        assert fc["pnl"][m] == ledger.read_month(CO, m)[0]
     assert fc["fy_totals"]["revenue"] == pytest.approx(sum(fc["totals"][m]["revenue"] for m in fc["months"]))
     first = fc["drivers"][0]
-    k = ledger.read_month("2026-09")[1]
+    k = ledger.read_month(CO, "2026-09")[1]
     assert first["pum_open"] == k["pum_close"]                       # starts from the actual position
     assert first["avg_rent"] == pytest.approx(k["avg_rent"] * 1.005)
     assert first["params"]["portals"] == 3680.0                      # latest estimate applied
@@ -49,7 +49,7 @@ def test_excel_forecast_matches_python(tmp_path):
     wb = openpyxl.load_workbook(path, data_only=True)
     ws, r = wb["Forecast"], lay["forecast"]["pnl"]
     fc = lay["scenario_results"]["base"]
-    for code in accounts.BY_CODE:
+    for code in CO.chart.by_code:
         assert ws["%s%d" % (workbook.TOTAL, r["L" + code])].value == pytest.approx(fc["fy"][code], abs=0.1)
     for k in ("revenue", "ebitda", "net_income"):
         assert ws["%s%d" % (workbook.TOTAL, r[k])].value == pytest.approx(fc["fy_totals"][k], abs=0.5)

@@ -286,60 +286,129 @@ BUDGET_LINES = {
 }
 
 
-def pnl_layout():
-    """Row plan of the management P&L: (kind, key, label). kind: section/account/subtotal/ratio/blank."""
-    g = lambda grp: [("account", a.code, a.name) for a in accounts.ACCOUNTS if a.group in grp]
-    return ([("section", None, "Revenue")] + g(("Management fees", "New business fees", "Other fee income"))
-            + [("subtotal", "revenue", "Total revenue"), ("blank", None, None),
-               ("section", None, "Operating costs")] + g(("Staff costs",))
-            + [("subtotal", "staff", "Staff costs")] + g(("Premises", "Marketing", "Overheads"))
+def pnl_layout(chart):
+    """Row plan of the management P&L: (kind, key, label). kind: section/account/subtotal/ratio/blank.
+    Cost lines with more than one account get a line subtotal (key "line:<name>")."""
+    def accts(section):
+        out = []
+        for line, _ in chart.lines(section):
+            codes = [a for a in chart.accounts if a.section == section and a.line == line]
+            out += [("account", a.code, a.name) for a in codes]
+            if section in ("cost_of_sales", "opex") and len(codes) > 1:
+                out.append(("subtotal", "line:" + line, line))
+        return out
+    lay = [("section", None, "Revenue")] + accts("revenue") + [("subtotal", "revenue", "Total revenue")]
+    if chart.has_cost_of_sales:
+        lay += ([("blank", None, None), ("section", None, "Cost of sales")] + accts("cost_of_sales")
+                + [("subtotal", "cost_of_sales", "Total cost of sales"), ("subtotal", "gross_profit", "Gross profit"),
+                   ("ratio", "gp_margin", "Gross margin")])
+    lay += ([("blank", None, None), ("section", None, "Operating costs")] + accts("opex")
             + [("subtotal", "opex", "Total operating costs"), ("blank", None, None),
-               ("subtotal", "ebitda", "EBITDA"), ("ratio", "margin", "EBITDA margin"), ("blank", None, None)]
-            + g(("Depreciation",)) + [("subtotal", "ebit", "EBIT")] + g(("Tax",))
-            + [("subtotal", "net_income", "Net income")])
+               ("subtotal", "ebitda", "EBITDA"), ("ratio", "margin", "EBITDA margin"), ("blank", None, None)])
+    lay += accts("depreciation") + [("subtotal", "ebit", "EBIT")]
+    if chart.has_interest:
+        lay += accts("interest") + [("subtotal", "pbt", "Profit before tax")]
+    lay += accts("tax") + [("subtotal", "net_income", "Net income")]
+    return lay
 
 
-def pnl_rows(start):
+def pnl_rows(chart, start):
     rows, row = {}, start
-    for kind, key, _ in pnl_layout():
+    for kind, key, _ in pnl_layout(chart):
         if key:
             rows[("L" + key) if kind == "account" else key] = row
         row += 1
     return rows
 
 
-SUBTOTALS = {
-    "revenue": lambda c, r: "=SUM(%s%d:%s%d)" % (c, r["L4000"], c, r["L4050"]),
-    "staff": lambda c, r: "=SUM(%s%d:%s%d)" % (c, r["L5000"], c, r["L5030"]),
-    "opex": lambda c, r: "=%s%d+SUM(%s%d:%s%d)" % (c, r["staff"], c, r["L6000"], c, r["L6900"]),
-    "ebitda": lambda c, r: "=%s%d-%s%d" % (c, r["revenue"], c, r["opex"]),
-    "ebit": lambda c, r: "=%s%d-%s%d" % (c, r["ebitda"], c, r["L7000"]),
-    "net_income": lambda c, r: "=%s%d-%s%d" % (c, r["ebit"], c, r["L9000"]),
-}
+def _sum(c, rows):
+    """SUM over the given rows of column c, as contiguous ranges."""
+    if not rows:
+        return "0"
+    rows, parts, i = sorted(rows), [], 0
+    while i < len(rows):
+        j = i
+        while j + 1 < len(rows) and rows[j + 1] == rows[j] + 1:
+            j += 1
+        parts.append("%s%d" % (c, rows[i]) if i == j else "%s%d:%s%d" % (c, rows[i], c, rows[j]))
+        i = j + 1
+    return "SUM(%s)" % ",".join(parts)
 
 
-def budget_sheet(wb, co, months, a, d):
-    ws = wb.create_sheet("Budget")
-    _title(ws, "Budget P&L: %s" % co.fy_label(), "%s. GBP, ex VAT. Calculated from Drivers and Assumptions." % co.name)
-    _index_row(ws, 3)
-    _month_header(ws, 4, months, co, "Management P&L")
-    r = pnl_rows(5)
-    ref = dict(d, **a, **r)
-    for (kind, key, label), row in zip(pnl_layout(), range(5, 5 + len(pnl_layout()))):
+REVENUE_LIKE = ("revenue", "gross_profit", "ebitda", "ebit", "pbt", "net_income")
+RATIO = {"margin": "ebitda", "gp_margin": "gross_profit"}
+
+
+def key_kind(key, chart):
+    if key in chart.by_code:
+        return chart.by_code[key].kind
+    return "revenue" if key in REVENUE_LIKE else "expense"
+
+
+def subtotal(key, c, r, chart):
+    acc = lambda *sec: [r["L" + x] for x in chart.codes(*sec)]
+    if key.startswith("line:"):
+        line = key[5:]
+        return "=" + _sum(c, [r["L" + a.code] for a in chart.accounts
+                              if a.line == line and a.section in ("cost_of_sales", "opex")])
+    if key in ("revenue", "cost_of_sales", "opex"):
+        return "=" + _sum(c, acc(key))
+    if key == "gross_profit":
+        return "=%s%d-%s%d" % (c, r["revenue"], c, r["cost_of_sales"])
+    if key == "ebitda":
+        return "=%s%d-%s%d" % (c, r["gross_profit" if chart.has_cost_of_sales else "revenue"], c, r["opex"])
+    if key == "ebit":
+        d = acc("depreciation")
+        return "=%s%d" % (c, r["ebitda"]) + ("-" + _sum(c, d) if d else "")
+    if key == "pbt":
+        return "=%s%d-%s" % (c, r["ebit"], _sum(c, acc("interest")))
+    if key == "net_income":
+        t = acc("tax")
+        return "=%s%d" % (c, r["pbt" if chart.has_interest else "ebit"]) + ("-" + _sum(c, t) if t else "")
+    raise KeyError(key)
+
+
+def ratio(key, c, r):
+    return "=IF(%s%d=0,0,%s%d/%s%d)" % (c, r["revenue"], c, r[RATIO[key]], c, r["revenue"])
+
+
+def write_pnl(ws, co, months, value, show=lambda i: True, start=5):
+    """The management P&L block. value(code, i, col) -> number or formula for an account cell;
+    subtotals and ratios are formulas (only in months where show(i))."""
+    chart = co.chart
+    r = pnl_rows(chart, start)
+    for (kind, key, label), row in zip(pnl_layout(chart), range(start, start + len(pnl_layout(chart)))):
         if kind == "section":
             _section(ws, row, label)
         elif kind == "account":
-            f = BUDGET_LINES[key]
-            _row(ws, row, label, key, lambda i, c, p, f=f: f.format(c=c, **ref), GBP, total="sum")
+            _row(ws, row, label, key, lambda i, c, p, key=key: value(key, i, c), GBP, total="sum")
         elif kind == "subtotal":
-            fn = SUBTOTALS[key]
-            _row(ws, row, label, "", lambda i, c, p, fn=fn: fn(c, r), GBP, F_BOLD, total="sum",
-                 border=TOP_BOTTOM if key in ("ebitda", "net_income") else TOP)
+            _row(ws, row, label, "", lambda i, c, p, key=key: subtotal(key, c, r, chart) if show(i) else None, GBP,
+                 F_BOLD, total="sum", border=TOP_BOTTOM if key in ("ebitda", "net_income") else TOP)
         elif kind == "ratio":
-            _row(ws, row, label, "", lambda i, c, p: "=IF(%s%d=0,0,%s%d/%s%d)" % (c, r["revenue"], c, r["ebitda"], c, r["revenue"]),
-                 PCT, F_NOTE, total="=IF(%s%d=0,0,%s%d/%s%d)" % (TOTAL, r["revenue"], TOTAL, r["ebitda"], TOTAL, r["revenue"]))
+            _row(ws, row, label, "", lambda i, c, p, key=key: ratio(key, c, r) if show(i) else None, PCT, F_NOTE,
+                 total=ratio(key, TOTAL, r))
+    return r
+
+
+def budget_sheet(wb, co, months, value, subtitle):
+    ws = wb.create_sheet("Budget")
+    _title(ws, "Budget P&L: %s" % co.fy_label(), "%s. GBP, ex VAT. %s" % (co.name, subtitle))
+    _index_row(ws, 3)
+    _month_header(ws, 4, months, co, "Management P&L")
+    r = write_pnl(ws, co, months, value)
     ws.freeze_panes = "D5"
     return r
+
+
+def lettings_budget(wb, co, months):
+    a = assumptions_sheet(wb, co, months)
+    d = drivers_sheet(wb, co, months, a)
+    r = pnl_rows(co.chart, 5)
+    ref = dict(d, **a, **r)
+    b = budget_sheet(wb, co, months, lambda code, i, c: BUDGET_LINES[code].format(c=c, **ref),
+                     "Calculated from Drivers and Assumptions.")
+    return {"assumptions": a, "drivers": d, "budget": b}
 
 
 def build(co, path, month=None, root=None):
@@ -347,10 +416,12 @@ def build(co, path, month=None, root=None):
     wb = Workbook()
     wb.remove(wb.active)
     months = co.fy_months()
-    a = assumptions_sheet(wb, co, months)
-    d = drivers_sheet(wb, co, months, a)
-    b = budget_sheet(wb, co, months, a, d)
-    out = {"assumptions": a, "drivers": d, "budget": b, "months": months}
+    if co.model == "lettings":
+        out = lettings_budget(wb, co, months)
+    else:
+        from . import rules
+        out = rules.budget_sheets(wb, co, months, root)
+    out["months"] = months
     if month:
         from . import variance
         res = variance.analyse(co, month, root)
@@ -370,7 +441,8 @@ def build(co, path, month=None, root=None):
         dashboard_sheet(wb, co, out)
         cover_sheet(wb, co, out)
         order = ["Cover", "Dashboard", "BvA", "Forecast", "Scenarios", "Cash13W", "Actuals", "Budget", "Drivers",
-                 "Assumptions", "Checks"]
+                 "Prior year", "Assumptions", "Checks"]
+        order = [n for n in order if n in wb.sheetnames]
         wb._sheets = [wb[n] for n in order] + [ws for ws in wb._sheets if ws.title not in order]
     for ws in wb.worksheets:
         ws.page_setup.orientation = "landscape"
@@ -401,40 +473,33 @@ def actuals_sheet(wb, co, months, res):
            "%s. GBP, ex VAT. Monthly trial balance exports; closed months to %s." % (co.name, _month_label(last)))
     _index_row(ws, 3)
     _month_header(ws, 4, months, co, "Management P&L")
-    r = pnl_rows(5)
     act = res["actuals"]
-    for (kind, key, label), row in zip(pnl_layout(), range(5, 5 + len(pnl_layout()))):
-        if kind == "section":
-            _section(ws, row, label)
-        elif kind == "account":
-            _row(ws, row, label, key, lambda i, c, p, key=key: act[months[i]]["pnl"][key] if months[i] in act else None,
-                 GBP, total="sum")
-        elif kind == "subtotal":
-            fn = SUBTOTALS[key]
-            _row(ws, row, label, "", lambda i, c, p, fn=fn: fn(c, r) if months[i] in act else None, GBP, F_BOLD,
-                 total="sum", border=TOP_BOTTOM if key in ("ebitda", "net_income") else TOP)
-        elif kind == "ratio":
-            _row(ws, row, label, "", lambda i, c, p: ("=IF(%s%d=0,0,%s%d/%s%d)" % (c, r["revenue"], c, r["ebitda"], c, r["revenue"]))
-                 if months[i] in act else None, PCT, F_NOTE,
-                 total="=IF(%s%d=0,0,%s%d/%s%d)" % (TOTAL, r["revenue"], TOTAL, r["ebitda"], TOTAL, r["revenue"]))
-    row = 5 + len(pnl_layout()) + 1
-    _section(ws, row, "Operating KPIs")
+    r = write_pnl(ws, co, months, lambda code, i, c: act[months[i]]["pnl"][code] if months[i] in act else None,
+                  show=lambda i: months[i] in act)
+    row = 5 + len(pnl_layout(co.chart)) + 1
     kr = {}
-    for key, label, fmt in KPI_ROWS:
+    if co.model == "lettings":
+        kpi_rows = KPI_ROWS
+    else:
+        keys = []
+        for m in months:
+            for k in (act[m]["kpis"] if m in act else {}):
+                if k not in keys:
+                    keys.append(k)
+        kpi_rows = [(k, k.replace("_", " ").capitalize(), NUM1) for k in keys]
+    if kpi_rows:
+        _section(ws, row, "Operating KPIs")
+    for key, label, fmt in kpi_rows:
         row += 1
         kr[key] = row
         tot = KPI_TOTAL.get(key, "sum")
         closed = sum(1 for m in months if m in act)
         total = {"first": "=%s%d" % (mcol(0), row), "last": "=%s%d" % (mcol(closed - 1), row),
                  "avg": "=AVERAGE(%s%d:%s%d)" % (mcol(0), row, mcol(closed - 1), row)}.get(tot, "sum")
-        _row(ws, row, label, "", lambda i, c, p, key=key: act[months[i]]["kpis"][key] if months[i] in act else None,
+        _row(ws, row, label, "", lambda i, c, p, key=key: act[months[i]]["kpis"].get(key) if months[i] in act else None,
              fmt, total=total)
     ws.freeze_panes = "D5"
     return {"pnl": r, "kpis": kr}
-
-
-BVA_KIND = {"revenue": "revenue", "staff": "expense", "opex": "expense", "ebitda": "revenue", "ebit": "revenue",
-            "net_income": "revenue"}
 
 
 def bva_sheet(wb, co, months, res):
@@ -471,10 +536,11 @@ def bva_sheet(wb, co, months, res):
         cell.fill, cell.font = FILL_HEAD, F_HEAD
         if col >= 4:
             cell.alignment = Alignment(horizontal="right")
-    src = pnl_rows(5)
+    chart = co.chart
+    src = pnl_rows(chart, 5)
     row = 10
     rows = {}
-    for kind, key, label in pnl_layout():
+    for kind, key, label in pnl_layout(chart):
         if kind == "blank":
             row += 1
             continue
@@ -492,7 +558,7 @@ def bva_sheet(wb, co, months, res):
         if kind == "account":
             ws.cell(row=row, column=2, value=key).font = F_NOTE
         if kind == "ratio":
-            r_rev, r_eb = rows["revenue"], rows["ebitda"]
+            r_rev, r_eb = rows["revenue"], rows[RATIO[key]]
             for col in "DEIJ":
                 c = ws["%s%d" % (col, row)]
                 c.value = "=IF(%s%d=0,0,%s%d/%s%d)" % (col, r_rev, col, r_eb, col, r_rev)
@@ -503,7 +569,7 @@ def bva_sheet(wb, co, months, res):
                 c.number_format, c.font = VARPCT, font
             row += 1
             continue
-        k = accounts.BY_CODE[key].kind if kind == "account" else BVA_KIND[key]
+        k = key_kind(key, chart)
         rng = lambda sheet: "%s!$D$%d:$O$%d" % (sheet, s, s)
         ws["D%d" % row] = "=INDEX(%s,r_sel)" % rng("Actuals")
         ws["E%d" % row] = "=INDEX(%s,r_sel)" % rng("Budget")
@@ -593,8 +659,8 @@ F_FCST = Font(name=FONT, size=9, color="5B2C83")
 def forecast_sheet(wb, co, months, fc, act_rows):
     ws = wb.create_sheet("Forecast")
     _title(ws, "Forecast %s: %s" % (fc["label"], co.fy_label()),
-           "%s. GBP, ex VAT. Actual months link to Actuals; forecast months (purple) come from the driver "
-           "engine (fpa.forecast) and config/forecast.toml." % co.name)
+           "%s. GBP, ex VAT. Actual months link to Actuals; forecast months (purple) come from the %s "
+           "(fpa.forecast) and forecast.toml." % (co.name, "driver engine" if co.model == "lettings" else "run-rate method"))
     for col, w in (("Q", 3), ("R", 11), ("S", 10), ("T", 8)):
         ws.column_dimensions[col].width = w
     _index_row(ws, 3)
@@ -605,29 +671,18 @@ def forecast_sheet(wb, co, months, fc, act_rows):
     for col, h in (("R", "Budget"), ("S", "Var"), ("T", "Var %")):
         c = ws["%s4" % col]
         c.value, c.fill, c.font, c.alignment = h, FILL_HEAD, F_HEAD, Alignment(horizontal="right")
-    r = pnl_rows(5)
+    chart = co.chart
     ap = act_rows["pnl"]
-    for (kind, key, label), row in zip(pnl_layout(), range(5, 5 + len(pnl_layout()))):
-        if kind == "section":
-            _section(ws, row, label)
-            continue
+    r = write_pnl(ws, co, months, lambda code, i, c: ("=Actuals!%s%d" % (c, ap["L" + code]))
+                  if fc["source"][months[i]] == "A" else round(fc["pnl"][months[i]][code], 2))
+    for (kind, key, label), row in zip(pnl_layout(chart), range(5, 5 + len(pnl_layout(chart)))):
         if kind == "account":
-            def f(i, c, p, key=key, row=row):
-                m = months[i]
-                return "=Actuals!%s%d" % (c, ap["L" + key]) if fc["source"][m] == "A" else round(fc["pnl"][m][key], 2)
-            _row(ws, row, label, key, f, GBP, total="sum")
             for i, m in enumerate(months):
                 if fc["source"][m] == "F":
                     ws.cell(row=row, column=FIRST_COL + i).font = F_FCST
-            kind_rev = accounts.BY_CODE[key].kind == "revenue"
-        elif kind == "subtotal":
-            fn = SUBTOTALS[key]
-            _row(ws, row, label, "", lambda i, c, p, fn=fn: fn(c, r), GBP, F_BOLD, total="sum",
-                 border=TOP_BOTTOM if key in ("ebitda", "net_income") else TOP)
-            kind_rev = BVA_KIND[key] == "revenue"
+        if kind in ("account", "subtotal"):
+            kind_rev = key_kind(key, chart) == "revenue"
         elif kind == "ratio":
-            _row(ws, row, label, "", lambda i, c, p: "=IF(%s%d=0,0,%s%d/%s%d)" % (c, r["revenue"], c, r["ebitda"], c, r["revenue"]),
-                 PCT, F_NOTE, total="=IF(%s%d=0,0,%s%d/%s%d)" % (TOTAL, r["revenue"], TOTAL, r["ebitda"], TOTAL, r["revenue"]))
             ws["R%d" % row] = "=Budget!%s%d" % (TOTAL, row)
             ws["S%d" % row] = "=%s%d-R%d" % (TOTAL, row, row)
             for col, fmt in (("R", PCT), ("S", VARPCT)):
@@ -643,11 +698,12 @@ def forecast_sheet(wb, co, months, fc, act_rows):
             c = ws["%s%d" % (col, row)]
             c.number_format, c.font = fmt, F_BOLD if bold else F_BASE
 
-    row = 5 + len(pnl_layout()) + 1
-    _section(ws, row, "Operating drivers")
+    row = 5 + len(pnl_layout(chart)) + 1
     kp = act_rows["kpis"]
     drv = {d["month"]: d for d in fc["drivers"]}
-    for key, label, fmt, dkey in (("pum_close", "Properties at end of month", NUM1, "pum_close"),
+    if co.model == "lettings":
+        _section(ws, row, "Operating drivers")
+    for key, label, fmt, dkey in () if co.model != "lettings" else (("pum_close", "Properties at end of month", NUM1, "pum_close"),
                                   ("avg_rent", "Average monthly rent", GBP, "avg_rent"),
                                   ("let_only_lets", "Let-only lets", NUM1, "let_only_lets"),
                                   ("relets", "Re-lets on managed stock", NUM1, "relets"),
@@ -661,9 +717,9 @@ def forecast_sheet(wb, co, months, fc, act_rows):
                 ws.cell(row=row, column=FIRST_COL + i).font = F_FCST
 
     row += 2
-    _section(ws, row, "Latest estimate assumptions (config/forecast.toml)")
+    _section(ws, row, "Latest estimate assumptions (forecast.toml)")
     from .forecast import load_le
-    notes = load_le().get("latest_estimate", {}).get("notes", {})
+    notes = load_le(co).get("latest_estimate", {}).get("notes", {})
     for k, v in fc["assumptions"].items():
         row += 1
         ws.cell(row=row, column=1, value=k.replace("_", " ").capitalize()).font = F_BASE
@@ -688,11 +744,13 @@ def scenarios_sheet(wb, co, sc):
         if col > 1:
             c.alignment = Alignment(horizontal="right")
             ws.column_dimensions[get_column_letter(col)].width = 13
-    groups = lambda p: accounts.by_group(p)
-    rows = [("Total revenue", lambda r: r["revenue"], GBP, True), ("Staff costs", None, GBP, False),
-            ("Total operating costs", lambda r: r["opex"], GBP, False), ("EBITDA", lambda r: r["ebitda"], GBP, True),
-            ("EBITDA margin", lambda r: r["ebitda"] / r["revenue"], PCT, False),
-            ("Net income", lambda r: r["net_income"], GBP, True)]
+    rows = [("Total revenue", lambda r: r["revenue"], GBP, True)]
+    if co.chart.has_cost_of_sales:
+        rows += [("Gross profit", lambda r: r["gross_profit"], GBP, False),
+                 ("Gross margin", lambda r: r["gross_profit"] / r["revenue"] if r["revenue"] else 0, PCT, False)]
+    rows += [("Total operating costs", lambda r: r["opex"], GBP, False), ("EBITDA", lambda r: r["ebitda"], GBP, True),
+             ("EBITDA margin", lambda r: r["ebitda"] / r["revenue"] if r["revenue"] else 0, PCT, False),
+             ("Net income", lambda r: r["net_income"], GBP, True)]
     row = 5
     out = {}
     for label, fn, fmt, bold in rows:
@@ -702,7 +760,7 @@ def scenarios_sheet(wb, co, sc):
                 t, p = base["budget_fy_totals"], base["budget_fy"]
             else:
                 t, p = sc[n]["fy_totals"], sc[n]["fy"]
-            v = groups(p)["Staff costs"] if fn is None else fn(t)
+            v = fn(t)
             c = ws.cell(row=row, column=2 + j, value=round(v, 4 if fmt == PCT else 2))
             c.number_format, c.font = fmt, F_BOLD if bold else F_BASE
         out[label] = row
@@ -712,16 +770,17 @@ def scenarios_sheet(wb, co, sc):
         col = get_column_letter(2 + j)
         c = ws.cell(row=row, column=2 + j, value="=%s%d-$B$%d" % (col, out["EBITDA"], out["EBITDA"]))
         c.number_format, c.font = VAR, F_BASE
-    row += 1
-    ws.cell(row=row, column=1, value="Properties under management at year end").font = F_BASE
-    for j, n in enumerate(names):
-        v = sc[n]["closing_pum"] if n != "budget" else base["budget_closing_pum"]
-        c = ws.cell(row=row, column=2 + j, value=round(v, 1))
-        c.number_format, c.font = NUM, F_BASE
+    if co.model == "lettings":
+        row += 1
+        ws.cell(row=row, column=1, value="Properties under management at year end").font = F_BASE
+        for j, n in enumerate(names):
+            v = sc[n]["closing_pum"] if n != "budget" else base["budget_closing_pum"]
+            c = ws.cell(row=row, column=2 + j, value=round(v, 1))
+            c.number_format, c.font = NUM, F_BASE
     row += 2
     _bva_section(ws, row, "Scenario definitions")
     from .forecast import load_le
-    le = load_le()
+    le = load_le(co)
     for n, d in le.get("scenarios", {}).items():
         row += 1
         ws.cell(row=row, column=1, value=n.capitalize()).font = F_BOLD
@@ -730,7 +789,6 @@ def scenarios_sheet(wb, co, sc):
 
 
 def cash_sheet(wb, co, cf):
-    from .cash import PAYMENT_LINES, RECEIPT_LINES
     ws = wb.create_sheet("Cash13W")
     _title(ws, "13-week cash flow: office account",
            "%s. GBP, incl. VAT. Built from the %s forecast with the timing rules in config [cash]; "
@@ -769,7 +827,7 @@ def cash_sheet(wb, co, cf):
         row += 1
         return row - 1
 
-    for sec, lines_ in (("Receipts", RECEIPT_LINES), ("Payments", PAYMENT_LINES)):
+    for sec, lines_ in (("Receipts", cf["receipt_lines"]), ("Payments", cf["payment_lines"])):
         _bva_section(ws, row, sec, FIRST_COL + 13)
         row += 1
         first = row
@@ -826,21 +884,24 @@ def checks_sheet(wb, co, out):
     b, a, f = out["budget"], out["actuals"]["pnl"], out["forecast"]["pnl"]
     bva, cr = out["bva"], out["cash"]
     sel_cols = "Actuals!$D$3:$O$3<=r_sel"
+    chart = co.chart
+    ytd = lambda row: "SUMPRODUCT(Actuals!$D$%d:$O$%d*(%s))" % (row, row, sel_cols)
+    below = [a["L" + c] for c in chart.codes("depreciation", "interest", "tax")]
+    cos_b = "-Budget!P%d" % b["cost_of_sales"] if chart.has_cost_of_sales else ""
+    cos_v = "+BvA!K%d" % bva["cost_of_sales"] if chart.has_cost_of_sales else ""
     checks = [
-        ("Budget: EBITDA = revenue - operating costs (full year)",
-         "=Budget!P%d-(Budget!P%d-Budget!P%d)" % (b["ebitda"], b["revenue"], b["opex"]), 0.01),
+        ("Budget: EBITDA = revenue - cost of sales - operating costs (full year)",
+         "=Budget!P%d-(Budget!P%d%s-Budget!P%d)" % (b["ebitda"], b["revenue"], cos_b, b["opex"]), 0.01),
         ("Budget: full year = sum of the 12 months (revenue)",
          "=Budget!P%d-SUM(Budget!D%d:O%d)" % (b["revenue"], b["revenue"], b["revenue"]), 0.01),
-        ("Actuals: net income = EBITDA - depreciation - tax (YTD)",
-         "=SUMPRODUCT(Actuals!$D$%d:$O$%d*(%s))-(SUMPRODUCT(Actuals!$D$%d:$O$%d*(%s))-SUMPRODUCT(Actuals!$D$%d:$O$%d*(%s))-SUMPRODUCT(Actuals!$D$%d:$O$%d*(%s)))"
-         % (a["net_income"], a["net_income"], sel_cols, a["ebitda"], a["ebitda"], sel_cols,
-            a["L7000"], a["L7000"], sel_cols, a["L9000"], a["L9000"], sel_cols), 0.01),
+        ("Actuals: net income = EBITDA - depreciation - interest - tax (YTD)",
+         "=%s-(%s%s)" % (ytd(a["net_income"]), ytd(a["ebitda"]), "".join("-" + ytd(r) for r in below)), 0.01),
         ("BvA: YTD actual revenue = Actuals sheet", "=BvA!I%d-SUMPRODUCT(Actuals!$D$%d:$O$%d*(%s))"
          % (bva["revenue"], a["revenue"], a["revenue"], sel_cols), 0.01),
         ("BvA: YTD budget EBITDA = Budget sheet", "=BvA!J%d-SUMPRODUCT(Budget!$D$%d:$O$%d*(Budget!$D$3:$O$3<=r_sel))"
          % (bva["ebitda"], b["ebitda"], b["ebitda"]), 0.01),
-        ("BvA: EBITDA variance = revenue variance + cost variance (YTD)",
-         "=BvA!K%d-(BvA!K%d+BvA!K%d)" % (bva["ebitda"], bva["revenue"], bva["opex"]), 0.01),
+        ("BvA: EBITDA variance = revenue variance + cost variances (YTD)",
+         "=BvA!K%d-(BvA!K%d%s+BvA!K%d)" % (bva["ebitda"], bva["revenue"], cos_v, bva["opex"]), 0.01),
         ("Forecast: closed months equal actuals (revenue)",
          "=SUMPRODUCT(Forecast!$D$%d:$O$%d*(%s))-SUMPRODUCT(Actuals!$D$%d:$O$%d*(%s))"
          % (f["revenue"], f["revenue"], sel_cols, a["revenue"], a["revenue"], sel_cols), 0.01),
@@ -890,8 +951,14 @@ def dashboard_sheet(wb, co, out):
         ("EBITDA, year to date", ty["ebitda"]["actual"], ty["ebitda"]["var"]),
         ("EBITDA, full-year forecast", fc["fy_totals"]["ebitda"], fc["fy_totals"]["ebitda"] - fc["budget_fy_totals"]["ebitda"]),
         ("Lowest cash, next 13 weeks", cf["lowest"], cf["lowest"] - cf["minimum"]),
-        ("Properties under management", res["kpis"][0][1], res["kpis"][0][1] - res["kpis"][0][2]),
     ]
+    if co.model == "lettings":
+        tiles.append(("Properties under management", res["kpis"][0][1], res["kpis"][0][1] - res["kpis"][0][2]))
+    elif "gp_margin" in ty:
+        tiles.append(("Gross margin, year to date", ty["gp_margin"]["actual"],
+                      ty["gp_margin"]["actual"] - ty["gp_margin"]["budget"]))
+    else:
+        tiles.append(("EBITDA margin, year to date", ty["margin"]["actual"], ty["margin"]["actual"] - ty["margin"]["budget"]))
     for j, (label, value, var) in enumerate(tiles):
         col = 1 + 2 * j
         ws.merge_cells(start_row=4, start_column=col, end_row=4, end_column=col + 1)
@@ -900,10 +967,12 @@ def dashboard_sheet(wb, co, out):
         a = ws.cell(row=4, column=col, value=label)
         a.font, a.fill = Font(name=FONT, size=8, color="FFFFFF", bold=True), FILL_HEAD
         is_count = "Properties" in label
-        v = ws.cell(row=5, column=col, value=("%.0f" % value) if is_count else _k(value))
+        is_pct = "margin" in label
+        v = ws.cell(row=5, column=col, value=("%.0f" % value) if is_count else ("%.1f%%" % (value * 100)) if is_pct else _k(value))
         v.font, v.alignment = Font(name=FONT, size=16, bold=True, color=NAVY), Alignment(horizontal="left")
         suffix = "vs budget" if "cash" not in label.lower() else "over the buffer"
-        t = ("%+.0f %s" % (var, suffix)) if is_count else ("%s%s %s" % ("+" if var >= 0 else "-", _k(abs(var)), suffix))
+        t = ("%+.0f %s" % (var, suffix)) if is_count else ("%+.1f pts %s" % (var * 100, suffix)) if is_pct else (
+            "%s%s %s" % ("+" if var >= 0 else "-", _k(abs(var)), suffix))
         w = ws.cell(row=6, column=col, value=t)
         w.font = Font(name=FONT, size=9, color="1B5E20" if var >= 0 else "B71C1C")
         for r in (4, 5, 6):
@@ -1023,8 +1092,10 @@ def cover_sheet(wb, co, out):
                 ("Scenarios", "Base, upside and downside full-year outcomes"),
                 ("Cash13W", "13-week cash flow for the office account"),
                 ("Actuals", "Monthly P&L and KPIs from the ledger"),
-                ("Budget", "Driver-based budget P&L"), ("Drivers", "Operating drivers behind the budget"),
+                ("Budget", "Driver-based budget P&L" if co.model == "lettings" else "Rule-based budget P&L"),
+                ("Drivers", "Operating drivers behind the budget"), ("Prior year", "Prior-year actuals the budget builds on"),
                 ("Assumptions", "Budget inputs (blue)"), ("Checks", "Reconciliations between the sheets")]
+    contents = [(n, d) for n, d in contents if n in wb.sheetnames]
     ws["B10"] = "Contents"
     ws["B10"].font = F_BOLD
     for i, (name, desc) in enumerate(contents):

@@ -17,6 +17,8 @@ const STEPS = [["actuals", "Reading the ledger exports"], ["workbook", "Building
   ["recalc", "Recalculating in Excel"], ["audit", "Checking every figure against the Python engine"]];
 
 let S = null;              // app state
+let SLUG = null;           // current company (folder name)
+const cq = () => "company=" + encodeURIComponent(SLUG || "");
 let lastJob = null, pollTimer = null, current = null;
 
 async function api(path, opts = {}) {
@@ -39,7 +41,8 @@ function toast(msg) {
 }
 
 async function loadState() {
-  S = await api("/api/state");
+  S = await api("/api/state" + (SLUG ? "?" + cq() : ""));
+  SLUG = S.slug;
   $("#co-name").textContent = S.company + " · " + S.fy;
   return S;
 }
@@ -117,7 +120,7 @@ function renderHome() {
 /* ---------------------------------------------------------------- runs */
 async function startRun(month) {
   try {
-    const { job } = await api("/api/runs", { method: "POST", body: JSON.stringify({ month }) });
+    const { job } = await api("/api/runs", { method: "POST", body: JSON.stringify({ company: SLUG, month }) });
     lastJob = month;
     location.hash = "#/job/" + job;
   } catch (e) { toast(e.message); }
@@ -152,7 +155,7 @@ function renderError(job) {
 async function showRun(run, tab) {
   if (current && current.run === run) return renderResult(current, tab);
   try {
-    const d = await api("/api/summary?run=" + encodeURIComponent(run));
+    const d = await api("/api/summary?" + cq() + "&run=" + encodeURIComponent(run));
     renderResult(d, tab);
   } catch (e) { toast(e.message); renderHome(); }
 }
@@ -246,13 +249,13 @@ function renderResult(d, tab = "overview", keep = false) {
       </div>
       <div class="res-actions">
         <button class="btn btn-primary" id="open-xl">Open in Excel</button>
-        <a class="btn" href="/api/download?run=${encodeURIComponent(d.run)}">Download pack</a>
+        <a class="btn" href="/api/download?${cq()}&run=${encodeURIComponent(d.run)}">Download pack</a>
       </div>
     </div>
     <nav class="tabs" role="tablist">${tabs.map(([id, lab]) => `<a role="tab" aria-selected="${id === tab}" class="tab${id === tab ? " on" : ""}" href="#/run/${d.run}/${id}">${lab}</a>`).join("")}</nav>
     <div class="tabbody">${body(d)}</div>`;
   $("#open-xl").onclick = async () => {
-    try { await api("/api/open", { method: "POST", body: JSON.stringify({ run: d.run }) }); toast("Opening in Excel…"); } catch (e) { toast(e.message); }
+    try { await api("/api/open", { method: "POST", body: JSON.stringify({ company: SLUG, run: d.run }) }); toast("Opening in Excel…"); } catch (e) { toast(e.message); }
   };
   const tog = $("#vtoggle");
   if (tog) tog.querySelectorAll("button").forEach((b) => (b.onclick = () => { d._period = b.dataset.p; renderResult(d, "variance", true); }));
@@ -400,7 +403,7 @@ function renderUpload() {
         <div class="form-actions"><button class="btn btn-primary" id="u-go" type="submit">Check and load</button><span class="form-err" id="u-err" role="alert"></span></div>
       </form>
       <p class="muted small">No export at hand? Download the synthetic ${mlabel(m)} files:
-        <a href="/api/sample?month=${m}&file=trial_balance">trial balance</a> · <a href="/api/sample?month=${m}&file=kpis">KPIs</a>.</p>
+        <a href="/api/sample?${cq()}&month=${m}&file=trial_balance">trial balance</a> · <a href="/api/sample?${cq()}&month=${m}&file=kpis">KPIs</a>.</p>
       <div id="u-ok" hidden></div>` : `<div class="actions"><a class="btn" href="#/">Back to months</a></div>`}
     </div>`;
   if (!m) return;
@@ -411,7 +414,7 @@ function renderUpload() {
     const err = $("#u-err"); err.textContent = "";
     const tb = await read($("#f-tb")), kp = await read($("#f-kp"));
     if (!tb || !kp) return (err.textContent = "Choose both files.");
-    const send = async (replace) => api("/api/upload", { method: "POST", body: JSON.stringify({ month: m, trial_balance: tb, kpis: kp, replace }) });
+    const send = async (replace) => api("/api/upload", { method: "POST", body: JSON.stringify({ company: SLUG, month: m, trial_balance: tb, kpis: kp, replace }) });
     $("#u-go").disabled = true;
     try {
       let r;

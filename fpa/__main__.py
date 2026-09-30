@@ -1,7 +1,8 @@
 """
 Command line:
 
-    python -m fpa run [--month 2026-09] [--no-recalc]   build, recalculate and audit the monthly pack
+    python -m fpa run [--company kestrel-row] [--month 2026-09] [--no-recalc]
+                                                        build, recalculate and audit the monthly pack
     python -m fpa simulate                              regenerate the synthetic actuals
     python -m fpa serve [--port 8766]                   start the local web panel
 """
@@ -14,6 +15,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
     r.add_argument("--month")
+    r.add_argument("--company", help="company folder under companies/ (default: kestrel-row)")
     r.add_argument("--no-recalc", action="store_true")
     sub.add_parser("simulate")
     s = sub.add_parser("serve")
@@ -25,7 +27,7 @@ def main(argv=None):
         sim()
     elif a.cmd == "run":
         from .pipeline import run
-        res = run(a.month, recalc=not a.no_recalc, progress=lambda s: print("..", s, flush=True))
+        res = run(a.month, recalc=not a.no_recalc, progress=lambda s: print("..", s, flush=True), slug=a.company)
         s = res["summary"]
         t = s["totals"]["ytd"]
         print("Pack: %s" % res["workbook"])

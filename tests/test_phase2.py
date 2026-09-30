@@ -2,7 +2,7 @@
 import openpyxl
 import pytest
 
-from fpa import accounts, budget, company, workbook
+from fpa import budget, company, workbook
 
 CO = company.load()
 
@@ -24,7 +24,7 @@ def test_budget_totals_are_consistent():
 def test_every_budget_figure_is_a_formula(built):
     path, lay = built
     ws = openpyxl.load_workbook(path)["Budget"]
-    for code in accounts.BY_CODE:
+    for code in CO.chart.by_code:
         row = lay["budget"]["L" + code]
         for i in range(12):
             v = ws["%s%d" % (workbook.mcol(i), row)].value
@@ -52,7 +52,7 @@ def test_excel_budget_matches_python(built):
     py = budget.build(CO)
     for i, m in enumerate(lay["months"]):
         col = workbook.mcol(i)
-        for code in accounts.BY_CODE:
+        for code in CO.chart.by_code:
             assert ws["%s%d" % (col, lay["budget"]["L" + code])].value == pytest.approx(py["pnl"][m][code], abs=0.05)
         for k in ("revenue", "opex", "ebitda", "ebit", "net_income"):
             assert ws["%s%d" % (col, lay["budget"][k])].value == pytest.approx(py["totals"][m][k], abs=0.1)

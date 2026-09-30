@@ -2,7 +2,7 @@
 import openpyxl
 import pytest
 
-from fpa import accounts, company, variance, workbook
+from fpa import company, variance, workbook
 
 CO = company.load()
 
@@ -15,12 +15,12 @@ def res():
 def test_variance_signs_and_totals(res):
     for period in ("month", "ytd"):
         for code, l in res["lines"][period].items():
-            expected = l["actual"] - l["budget"] if accounts.BY_CODE[code].kind == "revenue" else l["budget"] - l["actual"]
+            expected = l["actual"] - l["budget"] if CO.chart.by_code[code].kind == "revenue" else l["budget"] - l["actual"]
             assert l["var"] == pytest.approx(expected)
         t = res["totals"][period]
         assert t["ebitda"]["var"] == pytest.approx(t["revenue"]["var"] + t["opex"]["var"])
     assert res["totals"]["ytd"]["revenue"]["actual"] == pytest.approx(
-        sum(res["actuals"][m]["pnl"][c] for m in res["ytd_months"] for c in accounts.REVENUE))
+        sum(res["actuals"][m]["pnl"][c] for m in res["ytd_months"] for c in CO.chart.codes("revenue")))
 
 
 def test_bridges_add_up_to_the_variance(res):
@@ -56,7 +56,7 @@ def test_excel_bva_matches_python(tmp_path):
     recalc(path)
     ws = openpyxl.load_workbook(path, data_only=True)["BvA"]
     res = lay["variance"]
-    for code in accounts.BY_CODE:
+    for code in CO.chart.by_code:
         r = lay["bva"][code]
         for col, per, f in (("D", "month", "actual"), ("E", "month", "budget"), ("F", "month", "var"),
                             ("I", "ytd", "actual"), ("J", "ytd", "budget"), ("K", "ytd", "var")):

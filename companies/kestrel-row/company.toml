@@ -3,6 +3,8 @@
 
 [company]
 name = "Kestrel Row Lettings Ltd"
+model = "lettings"                     # driver-based budget template (fpa/drivers.py)
+description = "Letting and property-management agent, about 420 managed properties"
 currency = "GBP"
 fy_start_month = 4                     # April
 budget_year = 2026                     # FY2026/27 starts April 2026

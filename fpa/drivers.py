@@ -16,7 +16,6 @@ Events, keyed by month:
 """
 import copy
 
-from .accounts import ACCOUNTS
 
 PARAM_SECTIONS = ("portfolio", "fees", "costs", "staff")
 
@@ -118,4 +117,4 @@ def pnl(d, co):
         r[code] = r.get(code, 0.0) + amount
     ebit = sum(r[c] for c in r if c < "5000") - sum(r[c] for c in r if "5000" <= c < "9000")
     r["9000"] = p["corporation_tax_rate"] * ebit          # monthly accrual (a loss month accrues a credit)
-    return {a.code: round(r.get(a.code, 0.0), 2) for a in ACCOUNTS}
+    return {a.code: round(r.get(a.code, 0.0), 2) for a in co.chart.accounts}

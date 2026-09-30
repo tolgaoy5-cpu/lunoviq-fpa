@@ -1,63 +1,117 @@
 """
-Chart of accounts (P&L). Revenue accounts are credits, expense accounts debits.
-Groups roll the accounts up into the management P&L.
+Chart of accounts, per company (companies/<slug>/accounts.csv):
+
+    code,name,line,section,cash
+
+section   revenue | cost_of_sales | opex | depreciation | interest | tax | balance_sheet
+line      the management P&L line the account rolls up into (e.g. "Staff costs")
+cash      timing class for the 13-week cash flow (see fpa/cash.py); blank = default for the section
+
+Balance-sheet accounts may be listed so that full trial balances import cleanly;
+they are ignored by the P&L. All P&L amounts are positive (revenue as income,
+costs as expense); subtotals follow the standard management P&L:
+
+    revenue - cost of sales = gross profit - operating costs = EBITDA
+    - depreciation = EBIT - interest = profit before tax - tax = net income
 """
+import csv
 from dataclasses import dataclass
+from pathlib import Path
+
+SECTIONS = ("revenue", "cost_of_sales", "opex", "depreciation", "interest", "tax", "balance_sheet")
+PNL_SECTIONS = SECTIONS[:-1]
+SECTION_LABEL = {"revenue": "Revenue", "cost_of_sales": "Cost of sales", "opex": "Operating costs",
+                 "depreciation": "Depreciation", "interest": "Interest", "tax": "Tax"}
+
+
+class ChartError(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
 class Account:
     code: str
     name: str
-    group: str          # management P&L line
-    kind: str           # "revenue" or "expense"
+    line: str
+    section: str
+    cash: str = ""
+
+    @property
+    def kind(self):
+        return "revenue" if self.section == "revenue" else "expense"
+
+    @property
+    def group(self):                       # the management line (kept for older callers)
+        return self.line
 
 
-ACCOUNTS = [
-    Account("4000", "Management fees", "Management fees", "revenue"),
-    Account("4010", "Let-only fees", "New business fees", "revenue"),
-    Account("4020", "Tenancy set-up fees", "New business fees", "revenue"),
-    Account("4030", "Renewal fees", "Other fee income", "revenue"),
-    Account("4040", "Compliance income", "Other fee income", "revenue"),
-    Account("4050", "Maintenance commission", "Other fee income", "revenue"),
-    Account("5000", "Salaries", "Staff costs", "expense"),
-    Account("5010", "Employer NI", "Staff costs", "expense"),
-    Account("5020", "Pension", "Staff costs", "expense"),
-    Account("5030", "Commission and bonus", "Staff costs", "expense"),
-    Account("6000", "Office rent and rates", "Premises", "expense"),
-    Account("6010", "Utilities", "Premises", "expense"),
-    Account("6100", "Property portals", "Marketing", "expense"),
-    Account("6110", "Marketing", "Marketing", "expense"),
-    Account("6200", "Software and IT", "Overheads", "expense"),
-    Account("6300", "Insurance", "Overheads", "expense"),
-    Account("6400", "Professional fees", "Overheads", "expense"),
-    Account("6500", "Motor and travel", "Overheads", "expense"),
-    Account("6600", "Bad debts", "Overheads", "expense"),
-    Account("6900", "Other overheads", "Overheads", "expense"),
-    Account("7000", "Depreciation", "Depreciation", "expense"),
-    Account("9000", "Corporation tax", "Tax", "expense"),
-]
-BY_CODE = {a.code: a for a in ACCOUNTS}
-REVENUE = [a.code for a in ACCOUNTS if a.kind == "revenue"]
-OPEX = [a.code for a in ACCOUNTS if a.kind == "expense" and a.group not in ("Depreciation", "Tax")]
-GROUPS = ["Management fees", "New business fees", "Other fee income",
-          "Staff costs", "Premises", "Marketing", "Overheads"]
+class Chart:
+    def __init__(self, accounts):
+        codes = [a.code for a in accounts]
+        dup = sorted({c for c in codes if codes.count(c) > 1})
+        if dup:
+            raise ChartError("duplicate account codes: %s" % ", ".join(dup))
+        bad = [a.code for a in accounts if a.section not in SECTIONS]
+        if bad:
+            raise ChartError("unknown section for %s (use one of %s)" % (", ".join(bad), ", ".join(SECTIONS)))
+        self.all = list(accounts)
+        self.all_by_code = {a.code: a for a in accounts}
+        self.accounts = [a for a in accounts if a.section != "balance_sheet"]
+        self.by_code = {a.code: a for a in self.accounts}
+        if not any(a.section == "revenue" for a in self.accounts):
+            raise ChartError("the chart has no revenue accounts")
 
+    @classmethod
+    def load(cls, path):
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            rows = list(csv.DictReader(f))
+        need = {"code", "name", "line", "section"}
+        if not rows or not need <= set(rows[0]):
+            raise ChartError("%s: expected columns code,name,line,section[,cash]" % Path(path).name)
+        return cls([Account(r["code"].strip(), r["name"].strip(), r["line"].strip() or r["name"].strip(),
+                            r["section"].strip().lower(), (r.get("cash") or "").strip()) for r in rows])
 
-def totals(pnl):
-    """Management P&L subtotals from {code: amount} (all amounts positive)."""
-    rev = sum(pnl.get(c, 0.0) for c in REVENUE)
-    opex = sum(pnl.get(c, 0.0) for c in OPEX)
-    ebitda = rev - opex
-    ebit = ebitda - pnl.get("7000", 0.0)
-    return {"revenue": rev, "opex": opex, "ebitda": ebitda, "ebit": ebit,
-            "tax": pnl.get("9000", 0.0), "net_income": ebit - pnl.get("9000", 0.0)}
+    def save(self, path):
+        with open(path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["code", "name", "line", "section", "cash"])
+            for a in self.all:
+                w.writerow([a.code, a.name, a.line, a.section, a.cash])
 
+    def codes(self, *sections):
+        return [a.code for a in self.accounts if a.section in sections]
 
-def by_group(pnl):
-    out = {g: 0.0 for g in GROUPS}
-    for code, v in pnl.items():
-        g = BY_CODE[code].group
-        if g in out:
-            out[g] += v
-    return out
+    @property
+    def has_cost_of_sales(self):
+        return bool(self.codes("cost_of_sales"))
+
+    @property
+    def has_interest(self):
+        return bool(self.codes("interest"))
+
+    def lines(self, *sections):
+        """Management lines in chart order: [(line, section)]."""
+        out = []
+        for a in self.accounts:
+            if (a.line, a.section) not in out and (not sections or a.section in sections):
+                out.append((a.line, a.section))
+        return out
+
+    def totals(self, pnl):
+        s = lambda sec: sum(pnl.get(c, 0.0) for c in self.codes(sec))
+        rev, cos, opex = s("revenue"), s("cost_of_sales"), s("opex")
+        gp = rev - cos
+        ebitda = gp - opex
+        ebit = ebitda - s("depreciation")
+        pbt = ebit - s("interest")
+        return {"revenue": rev, "cost_of_sales": cos, "gross_profit": gp, "opex": opex, "ebitda": ebitda,
+                "depreciation": s("depreciation"), "ebit": ebit, "interest": s("interest"), "pbt": pbt,
+                "tax": s("tax"), "net_income": pbt - s("tax")}
+
+    def by_line(self, pnl):
+        out = {line: 0.0 for line, _ in self.lines()}
+        for code, v in pnl.items():
+            a = self.by_code.get(code)
+            if a:
+                out[a.line] += v
+        return out

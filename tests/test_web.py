@@ -18,23 +18,25 @@ RUN = "2026-09_20260930-120000"
 @pytest.fixture(scope="module")
 def base(tmp_path_factory):
     root = tmp_path_factory.mktemp("web")
-    actuals, out = root / "actuals", root / "output"
-    shutil.copytree(ledger.ACTUALS, actuals)
-    (out / RUN).mkdir(parents=True)
+    companies, out = root / "companies", root / "output"
+    shutil.copytree(company.COMPANIES, companies)
+    actuals = companies / "kestrel-row" / "actuals"
+    run_dir = out / "kestrel-row" / RUN
+    run_dir.mkdir(parents=True)
     summary = {"month": "2026-09", "generated": "2026-09-30T12:00:00",
                "totals": {"ytd": {"ebitda": {"actual": 114555.0, "var": -19748.0}}},
                "full_year": {"base": {"ebitda": 194752.0}},
                "audit": {"mismatches": [], "excel_errors": [], "model_checks": "OK", "values_checked": 409}}
-    (out / RUN / "summary.json").write_text(json.dumps(summary))
-    (out / RUN / "Kestrel_Row_Lettings_FPA_2026-09.xlsx").write_bytes(b"PK-fake")
-    server.state.update(output=str(out), actuals=str(actuals))
+    (run_dir / "summary.json").write_text(json.dumps(summary))
+    (run_dir / "Kestrel_Row_Lettings_FPA_2026-09.xlsx").write_bytes(b"PK-fake")
+    server.state.update(output=str(out), companies=str(companies))
 
-    def fake_run(month, out_root=None, root=None, progress=None, **kw):
+    def fake_run(month, out_root=None, progress=None, slug=None, **kw):
         for s in ("actuals", "workbook", "recalc", "audit"):
             progress(s)
         if month == "2026-04":
             raise ValueError("no actuals for 2026-04")
-        return {"dir": str(out / RUN), "summary": dict(summary, month=month)}
+        return {"dir": str(run_dir), "summary": dict(summary, month=month)}
 
     import fpa.pipeline
     orig = fpa.pipeline.run
@@ -45,7 +47,7 @@ def base(tmp_path_factory):
     yield "http://127.0.0.1:%d" % httpd.server_address[1], actuals
     httpd.shutdown()
     fpa.pipeline.run = orig
-    server.state.update(output=None, actuals=None)
+    server.state.update(output=None, companies=None)
 
 
 def call(url, body=None):
@@ -77,7 +79,7 @@ def october():
     import tempfile
     from pathlib import Path
     with tempfile.TemporaryDirectory() as tmp:
-        ledger.write_month("2026-10", *data["2026-10"], root=tmp)
+        ledger.write_month(CO, "2026-10", *data["2026-10"], root=tmp)
         return ((Path(tmp) / "2026-10" / "trial_balance.csv").read_text(),
                 (Path(tmp) / "2026-10" / "kpis.csv").read_text())
 
@@ -87,8 +89,11 @@ def test_index_and_state(base):
     code, html = call(url + "/")
     assert code == 200 and b"Lunoviq FP&amp;A" in html and b"/app.js?v=" in html
     code, s = call(url + "/api/state")
-    assert s["closed"][-1] == "2026-09" and s["next_month"] == "2026-10"
+    assert s["slug"] == "kestrel-row" and s["closed"][-1] == "2026-09" and s["next_month"] == "2026-10"
     assert s["runs"][0]["run"] == RUN and s["runs"][0]["healthy"]
+    assert "kestrel-row" in [c["slug"] for c in s["companies"]]
+    assert call(url + "/api/state?company=../etc")[0] == 404
+    assert call(url + "/api/state?company=nope")[0] == 404
 
 
 def test_run_job_reports_steps(base):
@@ -136,13 +141,14 @@ def test_upload_then_replace(base):
 
 def test_sample_download_and_files(base):
     url, _ = base
-    code, raw = call(url + "/api/sample?month=2026-10&file=trial_balance")
+    code, raw = call(url + "/api/sample?company=kestrel-row&month=2026-10&file=trial_balance")
     assert code == 200 and raw.startswith(b"period,account")
     assert call(url + "/api/sample?month=2030-01&file=kpis")[0] == 404
-    code, raw = call(url + "/api/download?run=" + RUN)
+    code, raw = call(url + "/api/download?company=kestrel-row&run=" + RUN)
     assert code == 200 and raw == b"PK-fake"
-    assert call(url + "/api/download?run=../../etc")[0] == 404
-    assert call(url + "/api/summary?run=nope")[0] == 404
+    assert call(url + "/api/download?company=kestrel-row&run=../../etc")[0] == 404
+    assert call(url + "/api/download?company=..&run=" + RUN)[0] == 404
+    assert call(url + "/api/summary?company=kestrel-row&run=nope")[0] == 404
     assert call(url + "/../fpa/company.py")[0] == 404
 
 

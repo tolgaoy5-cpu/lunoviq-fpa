@@ -4,14 +4,14 @@ Local web panel: `python -m fpa serve` -> http://127.0.0.1:8766
 Standard library only; binds to localhost. Packs are built one at a time on a
 worker thread (Excel recalculates one workbook at a time); the browser polls.
 
-API
-    GET  /api/state                   company, closed months, runs per month
-    POST /api/runs {month}            build the pack for a month -> {job}
+API (company = folder name under companies/, default kestrel-row)
+    GET  /api/state?company=<c>       companies, closed months, packs of the company
+    POST /api/runs {company, month}   build the pack for a month -> {job}
     GET  /api/runs/<job>              status, current step, summary when done
-    GET  /api/summary?run=<dir>       summary of a previous run
-    GET  /api/download?run=<dir>      the Excel pack
-    POST /api/open {run}              open the pack in Excel (macOS)
-    POST /api/upload {month, trial_balance, kpis, replace}   add a month of actuals (CSV text)
+    GET  /api/summary?company=<c>&run=<dir>    summary of a previous pack
+    GET  /api/download?company=<c>&run=<dir>   the Excel pack
+    POST /api/open {company, run}     open the pack in Excel (macOS)
+    POST /api/upload {company, month, trial_balance, kpis, replace}   add a month of actuals (CSV text)
     GET  /api/sample?month=<m>&file=trial_balance|kpis        synthetic export for a demo upload
     POST /api/quit                    stop the server
 """
@@ -42,16 +42,20 @@ MAX_UPLOAD = 2_000_000
 
 JOBS = {}
 QUEUE = queue.Queue()
-state = {"output": None, "actuals": None}          # overridable by tests
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
+state = {"output": None, "companies": None}        # overridable by tests
 
 
-def output_root():
+def output_root(slug):
     from ..pipeline import OUTPUT
-    return Path(state["output"] or OUTPUT)
+    return Path(state["output"] or OUTPUT) / slug
 
 
-def actuals_root():
-    return Path(state["actuals"] or ledger.ACTUALS)
+def get_company(slug):
+    slug = slug or company.DEFAULT
+    if not SLUG_RE.match(slug) or slug not in company.available(state["companies"]):
+        raise LookupError("Unknown company.")
+    return company.load(slug, state["companies"])
 
 
 def friendly_error(exc):
@@ -75,8 +79,9 @@ def worker():
         job = JOBS[job_id]
         job["status"] = "running"
         try:
-            res = pipeline.run(job["month"], out_root=output_root(), root=actuals_root(),
-                               progress=lambda s: job.__setitem__("step", s))
+            from ..pipeline import OUTPUT
+            res = pipeline.run(job["month"], out_root=state["output"] or OUTPUT, slug=job["company"],
+                               companies_root=state["companies"], progress=lambda s: job.__setitem__("step", s))
             job["run"] = Path(res["dir"]).name
             job["summary"] = res["summary"]
             job["status"] = "done"
@@ -88,15 +93,15 @@ def worker():
             QUEUE.task_done()
 
 
-def run_path(name):
-    if not name or not RUN_RE.match(name):
+def run_path(slug, name):
+    if not name or not RUN_RE.match(name) or not slug or not SLUG_RE.match(slug):
         return None
-    p = output_root() / name
-    return p if p.is_dir() and p.resolve().parent == output_root().resolve() else None
+    p = output_root(slug) / name
+    return p if p.is_dir() and p.resolve().parent == output_root(slug).resolve() else None
 
 
-def runs():
-    root = output_root()
+def runs(slug):
+    root = output_root(slug)
     out = []
     if root.exists():
         for p in sorted(root.iterdir(), reverse=True):
@@ -112,21 +117,30 @@ def runs():
     return out
 
 
-def app_state():
-    co = company.load()
+def app_state(slug=None):
+    co = get_company(slug)
     fy = co.fy_months()
-    have = set(ledger.available_months(actuals_root()))
+    have = set(ledger.available_months(co))
     closed = [m for m in fy if m in have]
     nxt = company.add_months(closed[-1], 1) if closed else fy[0]
-    return {"company": co.name, "fy": co.fy_label(), "fy_months": fy, "closed": closed,
-            "next_month": nxt if nxt in fy else None, "runs": runs()}
+    companies = []
+    for s in company.available(state["companies"]):
+        c = company.load(s, state["companies"])
+        companies.append({"slug": s, "name": c.name, "model": c.model,
+                          "description": c.cfg["company"].get("description", "")})
+    return {"slug": co.slug, "company": co.name, "model": co.model, "fy": co.fy_label(), "fy_months": fy,
+            "closed": closed, "next_month": nxt if nxt in fy else None, "runs": runs(co.slug),
+            "companies": companies, "sample": co.model == "lettings"}
 
 
 def upload(body):
     month = str(body.get("month", ""))
     if not MONTH_RE.match(month):
         return {"error": "Choose the month the files belong to."}, 400
-    co = company.load()
+    try:
+        co = get_company(body.get("company"))
+    except LookupError as e:
+        return {"error": str(e)}, 404
     if month not in co.fy_months():
         return {"error": "%s is outside %s." % (month, co.fy_label())}, 400
     tb, kp = body.get("trial_balance") or "", body.get("kpis") or ""
@@ -134,7 +148,7 @@ def upload(body):
         return {"error": "Both files are needed: the trial balance and the KPIs."}, 400
     if len(tb) + len(kp) > MAX_UPLOAD:
         return {"error": "The files are too large."}, 413
-    have = ledger.available_months(actuals_root())
+    have = ledger.available_months(co)
     if month in have and not body.get("replace"):
         return {"error": "Actuals for %s already exist. Replace them?" % month, "exists": True}, 409
     earlier = [m for m in co.fy_months() if m < month and m not in have]
@@ -146,20 +160,20 @@ def upload(body):
         (d / "trial_balance.csv").write_text(tb, encoding="utf-8")
         (d / "kpis.csv").write_text(kp, encoding="utf-8")
         try:
-            p, k = ledger.read_month(month, tmp)
+            p, k = ledger.read_month(co, month, tmp)
         except (ledger.LedgerError, KeyError, ValueError) as e:
             return {"error": "The files were not accepted: %s" % e}, 400
-        need = {"pum_open", "pum_close", "gained", "lost", "avg_rent", "let_only_lets", "relets",
-                "renewals", "headcount", "arrears_pct"}
-        missing = sorted(need - set(k))
-        if missing:
-            return {"error": "The KPI file is missing: %s." % ", ".join(missing)}, 400
-        dest = actuals_root() / month
+        if co.model == "lettings":
+            need = {"pum_open", "pum_close", "gained", "lost", "avg_rent", "let_only_lets", "relets",
+                    "renewals", "headcount", "arrears_pct"}
+            missing = sorted(need - set(k))
+            if missing:
+                return {"error": "The KPI file is missing: %s." % ", ".join(missing)}, 400
+        dest = co.actuals_dir / month
         if dest.exists():
             shutil.rmtree(dest)
         shutil.copytree(d, dest)
-    from ..accounts import totals
-    t = totals(p)
+    t = co.chart.totals(p)
     return {"ok": True, "month": month, "revenue": t["revenue"], "ebitda": t["ebitda"]}, 200
 
 
@@ -192,26 +206,32 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         if u.path == "/api/state":
-            return self._json(app_state())
+            try:
+                return self._json(app_state(q.get("company")))
+            except LookupError as e:
+                return self._json({"error": str(e)}, 404)
         if u.path.startswith("/api/runs/"):
             job = JOBS.get(u.path.rsplit("/", 1)[-1])
             if not job:
                 return self._json({"error": "Job not found."}, 404)
             return self._json(job)
         if u.path == "/api/summary":
-            p = run_path(q.get("run"))
+            p = run_path(q.get("company"), q.get("run"))
             if not p or not (p / "summary.json").exists():
                 return self._json({"error": "Run not found."}, 404)
-            return self._json(json.loads((p / "summary.json").read_text()) | {"run": p.name})
+            return self._json(json.loads((p / "summary.json").read_text()) | {"run": p.name, "slug": p.parent.name})
         if u.path == "/api/sample":
             month, which = q.get("month", ""), q.get("file", "")
-            co = company.load()
-            if month not in co.fy_months() or which not in ("trial_balance", "kpis"):
+            try:
+                co = get_company(q.get("company"))
+            except LookupError:
+                return self._json({"error": "Unknown sample."}, 404)
+            if co.model != "lettings" or month not in co.fy_months() or which not in ("trial_balance", "kpis"):
                 return self._json({"error": "Unknown sample."}, 404)
             from ..simulate import simulate
             with tempfile.TemporaryDirectory() as tmp:
                 data = simulate(co, last=month)
-                ledger.write_month(month, *data[month], root=tmp)
+                ledger.write_month(co, month, *data[month], root=tmp)
                 body = (Path(tmp) / month / ("%s.csv" % which)).read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/csv; charset=utf-8")
@@ -221,7 +241,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return None
         if u.path == "/api/download":
-            p = run_path(q.get("run"))
+            p = run_path(q.get("company"), q.get("run"))
             files = list(p.glob("*_FPA_*.xlsx")) if p else []
             if not files:
                 return self._json({"error": "File not found."}, 404)
@@ -258,17 +278,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "The request is too large."}, 413)
         if u.path == "/api/runs":
             month = str(body.get("month", ""))
-            if month not in app_state()["closed"]:
+            try:
+                st = app_state(body.get("company"))
+            except LookupError as e:
+                return self._json({"error": str(e)}, 404)
+            if month not in st["closed"]:
                 return self._json({"error": "There are no actuals for that month yet."}, 400)
             job_id = uuid.uuid4().hex[:12]
-            JOBS[job_id] = {"id": job_id, "month": month, "status": "queued", "step": None, "error": None}
+            JOBS[job_id] = {"id": job_id, "company": st["slug"], "month": month, "status": "queued", "step": None,
+                            "error": None}
             QUEUE.put(job_id)
             return self._json({"job": job_id}, 202)
         if u.path == "/api/upload":
             res, code = upload(body)
             return self._json(res, code)
         if u.path == "/api/open":
-            p = run_path(body.get("run"))
+            p = run_path(body.get("company"), body.get("run"))
             files = list(p.glob("*_FPA_*.xlsx")) if p else []
             if not files:
                 return self._json({"error": "File not found."}, 404)

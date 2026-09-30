@@ -12,7 +12,9 @@ def test_pipeline_without_excel_writes_pack_and_summary(tmp_path):
     wb = openpyxl.load_workbook(res["workbook"])
     assert wb.sheetnames[:3] == ["Cover", "Dashboard", "BvA"] and wb.sheetnames[-1] == "Checks"
     assert len(wb["Dashboard"]._charts) == 3
-    s = json.loads((tmp_path / res["dir"].split("/")[-1] / "summary.json").read_text())
+    from pathlib import Path
+    s = json.loads((Path(res["dir"]) / "summary.json").read_text())
+    assert Path(res["dir"]).parent.name == "kestrel-row"
     assert s["month"] == "2026-09" and s["forecast_label"] == "6+6"
     assert len(s["monthly"]) == 12 and len(s["cash"]["closing"]) == 13
     assert s["full_year"]["downside"]["ebitda"] < s["full_year"]["base"]["ebitda"] < s["full_year"]["upside"]["ebitda"]

@@ -1,0 +1,23 @@
+code,name,line,section,cash
+4000,Management fees,Management fees,revenue,rent_collection
+4010,Let-only fees,New business fees,revenue,invoice
+4020,Tenancy set-up fees,New business fees,revenue,invoice
+4030,Renewal fees,Other fee income,revenue,even
+4040,Compliance income,Other fee income,revenue,even
+4050,Maintenance commission,Other fee income,revenue,even
+5000,Salaries,Staff costs,opex,payroll_gross
+5010,Employer NI,Staff costs,opex,employer_ni
+5020,Pension,Staff costs,opex,pension
+5030,Commission and bonus,Staff costs,opex,payroll_gross
+6000,Office rent and rates,Premises,opex,office_rent_rates
+6010,Utilities,Premises,opex,supplier_vat
+6100,Property portals,Marketing,opex,supplier_vat
+6110,Marketing,Marketing,opex,supplier_vat
+6200,Software and IT,Overheads,opex,supplier_vat
+6300,Insurance,Overheads,opex,supplier_novat
+6400,Professional fees,Overheads,opex,supplier_vat
+6500,Motor and travel,Overheads,opex,supplier_novat
+6600,Bad debts,Overheads,opex,bad_debt
+6900,Other overheads,Overheads,opex,supplier_vat
+7000,Depreciation,Depreciation,depreciation,non_cash
+9000,Corporation tax,Corporation tax,tax,corporation_tax

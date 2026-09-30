@@ -1,7 +1,7 @@
 """Phase 1: company calendar, chart of accounts, driver engine, ledger I/O, synthetic actuals."""
 import pytest
 
-from fpa import accounts, company, ledger, simulate
+from fpa import company, ledger, simulate
 from fpa.drivers import driver_path, pnl
 
 CO = company.load()
@@ -28,12 +28,12 @@ def test_budget_drivers_follow_the_plan():
 def test_pnl_from_drivers():
     d = driver_path(CO, CO.fy_months())[0]
     p = pnl(d, CO)
-    assert set(p) == set(accounts.BY_CODE)
+    assert set(p) == set(CO.chart.by_code)
     fees = CO.cfg["fees"]
     assert p["4000"] == pytest.approx(d["avg_pum"] * d["avg_rent"] * CO.cfg["portfolio"]["collection_rate"]
                                       * fees["management_fee"], abs=0.01)
     assert p["5030"] == pytest.approx(0.10 * (p["4010"] + p["4020"]), abs=0.01)
-    t = accounts.totals(p)
+    t = CO.chart.totals(p)
     assert p["9000"] == pytest.approx(0.25 * t["ebit"], abs=0.01)
     assert t["net_income"] == pytest.approx(t["ebit"] * 0.75, abs=0.02)
 
@@ -55,11 +55,11 @@ def test_simulation_is_reproducible_and_tells_the_stories():
 
 def test_ledger_round_trip(tmp_path):
     data = simulate.simulate(CO)
-    ledger.write_month("2026-09", *data["2026-09"], root=tmp_path)
-    tb, kpis = ledger.read_month("2026-09", root=tmp_path)
+    ledger.write_month(CO, "2026-09", *data["2026-09"], root=tmp_path)
+    tb, kpis = ledger.read_month(CO, "2026-09", root=tmp_path)
     assert tb == data["2026-09"][0]
     assert kpis["pum_close"] == data["2026-09"][1]["pum_close"]
-    assert ledger.available_months(tmp_path) == ["2026-09"]
+    assert ledger.available_months(CO, tmp_path) == ["2026-09"]
 
 
 @pytest.mark.parametrize("edit, message", [
@@ -70,10 +70,10 @@ def test_ledger_round_trip(tmp_path):
     (lambda rows: rows.__setitem__(1, rows[1].rstrip() + "x\n"), "not a number"),
 ])
 def test_ledger_rejects_bad_exports(tmp_path, edit, message):
-    ledger.write_month("2026-09", *simulate.simulate(CO)["2026-09"], root=tmp_path)
+    ledger.write_month(CO, "2026-09", *simulate.simulate(CO)["2026-09"], root=tmp_path)
     f = tmp_path / "2026-09" / "trial_balance.csv"
     rows = f.read_text().splitlines(keepends=True)
     edit(rows)
     f.write_text("".join(rows))
     with pytest.raises(ledger.LedgerError, match=message):
-        ledger.read_month("2026-09", root=tmp_path)
+        ledger.read_month(CO, "2026-09", root=tmp_path)
