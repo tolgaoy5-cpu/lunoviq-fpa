@@ -1,0 +1,23 @@
+period,account,description,debit,credit
+2026-07,4000,Management fees,,73994.18
+2026-07,4010,Let-only fees,,24189.82
+2026-07,4020,Tenancy set-up fees,,4500.00
+2026-07,4030,Renewal fees,,1560.00
+2026-07,4040,Compliance income,,1200.00
+2026-07,4050,Maintenance commission,,3493.52
+2026-07,5000,Salaries,50666.67,
+2026-07,5010,Employer NI,6537.50,
+2026-07,5020,Pension,1520.00,
+2026-07,5030,Commission and bonus,2868.98,
+2026-07,6000,Office rent and rates,5500.00,
+2026-07,6010,Utilities,645.69,
+2026-07,6100,Property portals,3200.00,
+2026-07,6110,Marketing,1847.87,
+2026-07,6200,Software and IT,2045.00,
+2026-07,6300,Insurance,1300.00,
+2026-07,6400,Professional fees,2100.00,
+2026-07,6500,Motor and travel,1986.90,
+2026-07,6600,Bad debts,544.69,
+2026-07,6900,Other overheads,4531.00,
+2026-07,7000,Depreciation,1200.00,
+2026-07,9000,Corporation tax,5610.81,

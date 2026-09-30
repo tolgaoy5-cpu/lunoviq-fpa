@@ -1,0 +1,23 @@
+period,account,description,debit,credit
+2026-02,4000,Management fees,,69527.18
+2026-02,4010,Let-only fees,,17988.77
+2026-02,4020,Tenancy set-up fees,,4500.00
+2026-02,4030,Renewal fees,,1200.00
+2026-02,4040,Compliance income,,1175.00
+2026-02,4050,Maintenance commission,,3499.43
+2026-02,5000,Salaries,49208.33,
+2026-02,5010,Employer NI,6318.75,
+2026-02,5020,Pension,1476.25,
+2026-02,5030,Commission and bonus,2248.88,
+2026-02,6000,Office rent and rates,5300.00,
+2026-02,6010,Utilities,1273.29,
+2026-02,6100,Property portals,3000.00,
+2026-02,6110,Marketing,1750.50,
+2026-02,6200,Software and IT,1960.00,
+2026-02,6300,Insurance,1250.00,
+2026-02,6400,Professional fees,2000.00,
+2026-02,6500,Motor and travel,1704.36,
+2026-02,6600,Bad debts,489.45,
+2026-02,6900,Other overheads,1396.15,
+2026-02,7000,Depreciation,1200.00,
+2026-02,9000,Corporation tax,4328.60,

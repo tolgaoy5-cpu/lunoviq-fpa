@@ -1,0 +1,23 @@
+period,account,description,debit,credit
+2025-07,4000,Management fees,,64688.75
+2025-07,4010,Let-only fees,,22875.52
+2025-07,4020,Tenancy set-up fees,,5850.00
+2025-07,4030,Renewal fees,,1560.00
+2025-07,4040,Compliance income,,1000.00
+2025-07,4050,Maintenance commission,,3593.29
+2025-07,5000,Salaries,49208.33,
+2025-07,5010,Employer NI,6318.75,
+2025-07,5020,Pension,1476.25,
+2025-07,5030,Commission and bonus,2872.55,
+2025-07,6000,Office rent and rates,5300.00,
+2025-07,6010,Utilities,642.07,
+2025-07,6100,Property portals,3000.00,
+2025-07,6110,Marketing,2007.56,
+2025-07,6200,Software and IT,1960.00,
+2025-07,6300,Insurance,1250.00,
+2025-07,6400,Professional fees,2000.00,
+2025-07,6500,Motor and travel,1780.10,
+2025-07,6600,Bad debts,497.84,
+2025-07,6900,Other overheads,1617.39,
+2025-07,7000,Depreciation,1200.00,
+2025-07,9000,Corporation tax,4609.18,
