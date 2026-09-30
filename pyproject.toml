@@ -1,0 +1,20 @@
+[project]
+name = "lunoviq-fpa"
+version = "0.1.0"
+description = "Budgeting, forecasting and management reporting: driver-based budget, budget vs actual, rolling forecast, 13-week cash, audited Excel pack and web panel"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["openpyxl>=3.1"]
+
+[project.optional-dependencies]
+excel = ["xlwings>=0.30"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+lunoviq-fpa = "fpa.__main__:main"
+
+[tool.setuptools]
+packages = ["fpa", "fpa.web"]
+
+[tool.setuptools.package-data]
+"fpa.web" = ["static/*"]

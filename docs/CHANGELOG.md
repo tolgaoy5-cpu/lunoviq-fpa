@@ -175,3 +175,16 @@
   - The web tests found a `log_message` crash on 404 responses; fixed.
   - A real pack build from the API passed the audit: 409 values, 0 mismatches, checks OK.
 - **Tests:** 7 new web API tests (pipeline stubbed); 37 in total.
+
+## 2026-09-30: Phase 8, documentation and packaging
+
+- **README:**
+  - what it does, and the September 2026 story with its numbers,
+  - the Excel pack and the audit,
+  - quick start and the monthly workflow,
+  - tests, repository layout, limitations and license.
+- **Screenshots:** web Overview, Variance and Cash tabs, and the Excel dashboard exported through Excel.
+- **Packaging:** `LICENSE` (all rights reserved; viewing only) and `pyproject.toml`.
+- **Mac app:** `tools/make_mac_app.py` builds `~/Applications/Lunoviq FPA.app`, with its own icon and a background server on port 8766. Verified: launched from the icon, the server started and the panel opened.
+- **Fixed:** a race in the web worker, where the job status was set to "error" before the message was stored. The web test caught it intermittently. The same fix was applied to Lunoviq.
+- **Tests:** 37 passed.

@@ -81,8 +81,8 @@ def worker():
             job["summary"] = res["summary"]
             job["status"] = "done"
         except Exception as e:                              # noqa: BLE001 - reported to the UI
-            job["status"] = "error"
             job["error"], job["detail"], job["retryable"] = friendly_error(e)
+            job["status"] = "error"                          # last: pollers must see the message with it
             traceback.print_exc()
         finally:
             QUEUE.task_done()
