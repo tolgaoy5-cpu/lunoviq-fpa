@@ -1,0 +1,41 @@
+Trial Balance
+Brightwell Cleaning Services Ltd
+As at 30 April 2026
+
+Account Code,Account,Account Type,Debit - Year to date,Credit - Year to date
+090,Business bank account,Bank,"17,092.07",
+200,Sales - Commercial contracts,Revenue,,"41,042.67"
+201,Sales - Domestic cleaning,Revenue,,"18,000.96"
+202,Sales - End of tenancy cleans,Revenue,,"8,527.98"
+203,Sales - Carpet and upholstery,Revenue,,"5,433.75"
+310,Direct wages - cleaners,Direct Costs,"35,427.28",
+311,Direct wages - employer NI,Direct Costs,"2,727.90",
+312,Direct wages - pension,Direct Costs,"1,062.82",
+320,Cleaning materials and supplies,Direct Costs,"3,599.91",
+325,Subcontractors,Direct Costs,"2,676.32",
+400,Advertising and marketing,Expense,"1,162.86",
+404,Bank and card fees,Expense,803.06,
+412,Accountancy,Expense,600.00,
+416,Depreciation,Expense,900.00,
+433,Insurance,Expense,560.00,
+437,Interest paid,Expense,210.00,
+445,"Light, power, heating",Expense,308.44,
+449,Motor vehicle expenses,Expense,"3,150.93",
+450,Vehicle leasing,Expense,"2,400.00",
+463,IT software and subscriptions,Expense,460.00,
+469,Rent,Expense,"1,650.00",
+477,Office salaries,Expense,"8,900.00",
+478,Employer NI - office,Expense,880.00,
+479,Pension - office,Expense,267.00,
+489,Telephone and internet,Expense,310.00,
+500,Corporation tax,Expense,"1,237.21",
+610,Accounts receivable,Current Asset,"79,175.57",
+710,Office equipment,Fixed Asset,"6,200.00",
+720,Vehicles,Fixed Asset,"40,550.00",
+800,Accounts payable,Current Liability,,"10,816.25"
+820,VAT,Current Liability,,"16,808.45"
+825,PAYE and NI payable,Current Liability,,"7,344.10"
+830,Corporation tax payable,Current Liability,,"22,737.21"
+900,Van loan,Non-current Liability,,"17,600.00"
+960,Retained earnings,Equity,,"64,000.00"
+,Total,,"212,311.36","212,311.36"

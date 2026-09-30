@@ -1,0 +1,26 @@
+period,account,description,debit,credit
+2025-08,200,Sales - Commercial contracts,,37996.92
+2025-08,201,Sales - Domestic cleaning,,15369.58
+2025-08,202,Sales - End of tenancy cleans,,13925.90
+2025-08,203,Sales - Carpet and upholstery,,3073.88
+2025-08,310,Direct wages - cleaners,32060.47,
+2025-08,311,Direct wages - employer NI,2468.66,
+2025-08,312,Direct wages - pension,961.81,
+2025-08,320,Cleaning materials and supplies,3617.44,
+2025-08,325,Subcontractors,4198.11,
+2025-08,477,Office salaries,8550.00,
+2025-08,478,Employer NI - office,840.00,
+2025-08,479,Pension - office,256.00,
+2025-08,469,Rent,1575.00,
+2025-08,445,"Light, power, heating",228.57,
+2025-08,449,Motor vehicle expenses,2627.60,
+2025-08,450,Vehicle leasing,2400.00,
+2025-08,400,Advertising and marketing,1202.76,
+2025-08,404,Bank and card fees,774.03,
+2025-08,412,Accountancy,600.00,
+2025-08,433,Insurance,530.00,
+2025-08,463,IT software and subscriptions,460.00,
+2025-08,489,Telephone and internet,310.00,
+2025-08,416,Depreciation,900.00,
+2025-08,437,Interest paid,210.00,
+2025-08,500,Corporation tax,1398.96,

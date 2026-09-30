@@ -604,7 +604,8 @@ def bva_sheet(wb, co, months, res):
             row += 1
         row += 1
 
-    _bva_section(ws, row, "Driver bridges (favourable +)")
+    _bva_section(ws, row, "Driver bridges (favourable +)" if co.model == "lettings"
+                 else "Flexed budget: cost lines budgeted as a share of sales (favourable +)")
     row += 1
     heads = ["Driver", "", "", "Volume", "Rate", "Other", "Total", "", "Volume", "Rate", "Other", "Total"]
     ws.cell(row=row, column=4, value="Month").font = F_BOLD
@@ -623,8 +624,10 @@ def bva_sheet(wb, co, months, res):
                 c = ws.cell(row=row, column=base + j, value=round(b[f], 2))
                 c.number_format, c.font = VAR, F_BOLD if f == "var" else F_BASE
         row += 1
-    ws.cell(row=row, column=1, value="Volume = properties, lets or headcount; rate = average rent; "
-                                      "other = collection, fee mix and pay.").font = F_NOTE
+    ws.cell(row=row, column=1, value=("Volume = properties, lets or headcount; rate = average rent; "
+                                       "other = collection, fee mix and pay." if co.model == "lettings" else
+                                       "Costs budgeted as a share of sales: volume = effect of sales above/below "
+                                       "budget; rate = change in the cost share of sales.")).font = F_NOTE
     row += 2
 
     _bva_section(ws, row, "Operating KPIs: %s" % _month_label(res["month"]))
@@ -719,7 +722,7 @@ def forecast_sheet(wb, co, months, fc, act_rows):
     row += 2
     _section(ws, row, "Latest estimate assumptions (forecast.toml)")
     from .forecast import load_le
-    notes = load_le(co).get("latest_estimate", {}).get("notes", {})
+    notes = fc.get("assumption_notes") or load_le(co).get("latest_estimate", {}).get("notes", {})
     for k, v in fc["assumptions"].items():
         row += 1
         ws.cell(row=row, column=1, value=k.replace("_", " ").capitalize()).font = F_BASE

@@ -1,0 +1,58 @@
+# Brightwell Cleaning Services Ltd: a fictional UK commercial and domestic cleaning company.
+# Budgeted by rules (fpa/rules.py) from last year's actuals. Amounts in GBP, ex VAT.
+
+[company]
+name = "Brightwell Cleaning Services Ltd"
+model = "rules"
+description = "Commercial and domestic cleaning, about 45 cleaners"
+currency = "GBP"
+fy_start_month = 4
+budget_year = 2026
+first_actual_month = "2025-04"
+last_closed_month = "2026-09"
+
+[budget.defaults]
+revenue = {method = "growth", rate = 0.05}
+cost_of_sales = {method = "growth", rate = 0.05}
+opex = {method = "growth", rate = 0.04}
+depreciation = {method = "prior_year"}
+interest = {method = "prior_year"}
+tax = {method = "tax", rate = 0.25}
+
+[budget.accounts]
+"200" = {method = "growth", rate = 0.06, note = "Price rises on contract renewals plus two new contracts"}
+"201" = {method = "growth", rate = 0.05}
+"202" = {method = "growth", rate = 0.08, note = "Partnership with two letting agents"}
+"203" = {method = "growth", rate = 0.03}
+"310" = {method = "pct_revenue", rate = 0.47, note = "Cleaners' pay as a share of sales, after the April wage rise"}
+"311" = {method = "pct_revenue", rate = 0.036}
+"312" = {method = "pct_revenue", rate = 0.014}
+"320" = {method = "pct_revenue", rate = 0.05}
+"325" = {method = "pct_revenue", rate = 0.05}
+"469" = {method = "fixed", monthly = 1650.0, note = "Lease renewed at £19,800 a year"}
+"404" = {method = "pct_revenue", rate = 0.011, note = "Card and bank fees follow sales"}
+
+[reporting]
+month_abs = 750.0
+month_pct = 0.10
+ytd_abs = 2500.0
+ytd_pct = 0.05
+month_always = 3000.0                  # flagged on size alone, whatever the percentage
+ytd_always = 7500.0
+
+[cash]
+opening_balance = 96000.0
+minimum_balance = 35000.0
+vat_registered = true
+vat_rate = 0.20
+vat_quarter_end_months = [3, 6, 9, 12]
+vat_payment_lag_days = 37
+payroll_day = 28
+paye_day = 22
+supplier_day = 15
+employee_deductions = 0.12
+employee_pension = 0.05
+invoice_terms_days = 30
+corporation_tax_due = "2027-01-01"
+corporation_tax_fy_prior = 0.0
+dividends = [["2026-11-27", 30000.0]]

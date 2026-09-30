@@ -28,11 +28,12 @@ def _fav(kind, actual, budget_):
     return actual - budget_ if kind == "revenue" else budget_ - actual
 
 
-def _line(label, kind, a, b, abs_t, pct_t):
+def _line(label, kind, a, b, abs_t, pct_t, always=None):
+    """Flag when the variance passes both thresholds, or the absolute `always` threshold on its own."""
     var = _fav(kind, a, b)
     pct = var / abs(b) if b else 0.0
     return {"label": label, "actual": a, "budget": b, "var": var, "pct": pct,
-            "flag": abs(var) >= abs_t and abs(pct) >= pct_t}
+            "flag": (abs(var) >= abs_t and abs(pct) >= pct_t) or (always is not None and abs(var) >= always)}
 
 
 def load_notes(co):
@@ -130,11 +131,12 @@ def analyse(co, month, root=None, notes=None):
         return sum(src[m]["pnl"][code] for m in months)
 
     lines = {"month": {}, "ytd": {}}
+    m_always, y_always = rep.get("month_always"), rep.get("ytd_always")
     for code, acc in chart.by_code.items():
         lines["month"][code] = _line(acc.name, acc.kind, act[month]["pnl"][code], bmonths[month]["pnl"][code],
-                                     rep["month_abs"], rep["month_pct"])
+                                     rep["month_abs"], rep["month_pct"], m_always)
         lines["ytd"][code] = _line(acc.name, acc.kind, agg(act, ytd, code), agg(bmonths, ytd, code),
-                                   rep["ytd_abs"], rep["ytd_pct"])
+                                   rep["ytd_abs"], rep["ytd_pct"], y_always)
     totals = {}
     for period, months in (("month", [month]), ("ytd", ytd)):
         a_p = {c: agg(act, months, c) for c in chart.by_code}
@@ -142,16 +144,17 @@ def analyse(co, month, root=None, notes=None):
         a_t, b_t = chart.totals(a_p), chart.totals(b_p)
         a_g, b_g = chart.by_line(a_p), chart.by_line(b_p)
         abs_t, pct_t = (rep["month_abs"], rep["month_pct"]) if period == "month" else (rep["ytd_abs"], rep["ytd_pct"])
+        always = m_always if period == "month" else y_always
         t = {}
         for g, section in chart.lines("revenue", "cost_of_sales", "opex"):
-            t[g] = _line(g, "revenue" if section == "revenue" else "expense", a_g[g], b_g[g], abs_t, pct_t)
+            t[g] = _line(g, "revenue" if section == "revenue" else "expense", a_g[g], b_g[g], abs_t, pct_t, always)
         keys = [("revenue", "Total revenue", "revenue")]
         if chart.has_cost_of_sales:
             keys += [("cost_of_sales", "Total cost of sales", "expense"), ("gross_profit", "Gross profit", "revenue")]
         keys += [("opex", "Total operating costs", "expense"), ("ebitda", "EBITDA", "revenue"),
                  ("net_income", "Net income", "revenue")]
         for key, label, kind in keys:
-            t[key] = _line(label, kind, a_t[key], b_t[key], abs_t, pct_t)
+            t[key] = _line(label, kind, a_t[key], b_t[key], abs_t, pct_t, always)
         t["margin"] = {"actual": a_t["ebitda"] / a_t["revenue"] if a_t["revenue"] else 0.0,
                        "budget": b_t["ebitda"] / b_t["revenue"] if b_t["revenue"] else 0.0}
         if chart.has_cost_of_sales:
@@ -161,8 +164,10 @@ def analyse(co, month, root=None, notes=None):
 
     if not lettings:
         kp = act[month]["kpis"]
+        bridges = {"month": _flex_bridges(co, act, bmonths, [month]), "ytd": _flex_bridges(co, act, bmonths, ytd)}
         res = {"month": month, "ytd_months": ytd, "fy": co.fy_label(), "company": co.name, "model": co.model,
-               "lines": lines, "totals": totals, "bridges": {"month": {}, "ytd": {}},
+               "thresholds": {"month": rep["month_abs"], "ytd": rep["ytd_abs"]},
+               "lines": lines, "totals": totals, "bridges": bridges,
                "kpis": [(k.replace("_", " ").capitalize(), v, None, "number") for k, v in kp.items()],
                "ytd_kpis": [], "actuals": act, "budget": bmonths, "chart": chart}
         res["commentary"] = commentary(res, notes)
@@ -192,6 +197,38 @@ def analyse(co, month, root=None, notes=None):
            "actuals": act, "budget": bmonths, "chart": chart}
     res["commentary"] = commentary(res, notes)
     return res
+
+
+def _flex_bridges(co, act, bmonths, months):
+    """Flexed-budget split for costs budgeted as a share of revenue, by management line:
+    volume = the cost change explained by sales being above/below budget (at the budgeted share);
+    rate = the change in the cost share itself (actual share - budgeted share, on actual sales).
+    Favourable +."""
+    from . import rules as rules_mod
+    chart = co.chart
+    rs = rules_mod.rules(co)
+    rev = chart.codes("revenue")
+    a_rev = sum(act[m]["pnl"][c] for m in months for c in rev)
+    b_rev = sum(bmonths[m]["pnl"][c] for m in months for c in rev)
+    out = {}
+    for a in chart.accounts:
+        r = rs.get(a.code, {})
+        if r.get("method") != "pct_revenue" or a.section not in ("cost_of_sales", "opex"):
+            continue
+        actual = sum(act[m]["pnl"][a.code] for m in months)
+        budget_ = sum(bmonths[m]["pnl"][a.code] for m in months)
+        b_share = budget_ / b_rev if b_rev else 0.0
+        a_share = actual / a_rev if a_rev else 0.0
+        o = out.setdefault(a.line, {"volume": 0.0, "rate": 0.0, "other": 0.0, "var": 0.0,
+                                    "actual_share": 0.0, "budget_share": 0.0})
+        o["volume"] += -b_share * (a_rev - b_rev)
+        o["rate"] += (b_share - a_share) * a_rev
+        o["var"] += budget_ - actual
+        o["actual_share"] += a_share
+        o["budget_share"] += b_share
+    for o in out.values():
+        o["other"] = o["var"] - o["volume"] - o["rate"]
+    return out
 
 
 def _facts(res, period):
@@ -235,6 +272,9 @@ def commentary(res, notes):
         lettings = res["model"] == "lettings"
         facts = _facts(res, period) if lettings else {}
         bridge_accounts = BRIDGE_ACCOUNTS if lettings else {}
+        if "gp_margin" in t:
+            items[0] = (items[0][0], items[0][1][:-1] + "; gross margin %.1f%% vs %.1f%%."
+                        % (t["gp_margin"]["actual"] * 100, t["gp_margin"]["budget"] * 100), items[0][2])
         tax = set(res["chart"].codes("tax"))
         note_months = [res["month"]] if period == "month" else res["ytd_months"]
         flagged = sorted((c for c, l in res["lines"][period].items() if l["flag"] and c not in tax),
@@ -263,10 +303,48 @@ def commentary(res, notes):
                     n = notes.get(m, {}).get(c)
                     if n and n not in reasons:
                         reasons.append(n)
+            flex = None if lettings else res["bridges"][period].get(res["chart"].by_code[code].line)
+            if flex and all(c in flagged for c in _line_codes(res, code)):
+                text += "; cost share %.1f%% of sales vs %.1f%% budgeted" % (flex["actual_share"] * 100,
+                                                                              flex["budget_share"] * 100)
             if reasons:
                 text += ". " + " ".join(reasons)
             items.append((label, text.rstrip(".") + ".", (res["bridges"][period][bridge]["var"] if bridge == "Staff costs" else l["var"]) >= 0))
+        if not lettings:
+            items += _flex_commentary(res, period, notes, note_months, set(flagged))
         out[period] = items
+    return out
+
+
+def _line_codes(res, code):
+    line = res["chart"].by_code[code].line
+    return [a.code for a in res["chart"].accounts if a.line == line and a.section in ("cost_of_sales", "opex")]
+
+
+def _flex_commentary(res, period, notes, note_months, flagged=()):
+    """Cost lines whose share of sales moved materially (even when the total variance is small);
+    lines whose accounts are all flagged already are covered by the account items."""
+    rep_abs = res.get("thresholds", {}).get(period)
+    out = []
+    for line, b in sorted(res["bridges"][period].items(), key=lambda kv: -abs(kv[1]["rate"])):
+        if rep_abs is not None and abs(b["rate"]) < rep_abs:
+            continue
+        codes = [a.code for a in res["chart"].accounts if a.line == line]
+        if codes and all(c in flagged for c in codes):
+            continue
+        text = "%s %s overall; cost share %.1f%% of sales vs %.1f%% budgeted (%s), lower/higher sales (%s)" % (
+            _k(b["var"]), _fa(b["var"]), b["actual_share"] * 100, b["budget_share"] * 100, _signed(b["rate"]),
+            _signed(b["volume"]))
+        text = text.replace("lower/higher sales", "lower sales" if b["volume"] >= 0 else "higher sales")
+        reasons = []
+        for m in note_months:
+            for c in codes:
+                n = notes.get(m, {}).get(c)
+                if n and n not in reasons:
+                    reasons.append(n)
+        if reasons:
+            text += ". " + " ".join(reasons)
+        out.append((line + " (cost share)", text.rstrip(".") + ".", b["rate"] >= 0))
     return out
 
 

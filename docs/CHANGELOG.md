@@ -188,3 +188,43 @@
 - **Mac app:** `tools/make_mac_app.py` builds `~/Applications/Lunoviq FPA.app`, with its own icon and a background server on port 8766. Verified: launched from the icon, the server started and the panel opened.
 - **Fixed:** a race in the web worker, where the job status was set to "error" before the message was stored. The web test caught it intermittently. The same fix was applied to Lunoviq.
 - **Tests:** 37 passed.
+
+## 2026-09-30: Any company: importer, rule-based budget, flexed budget, second demo company
+
+The user asked for the system to work for any company, with the example company kept.
+
+- **Workspaces:** each company lives in `companies/<slug>/`:
+  - `company.toml`,
+  - `accounts.csv` (code, name, line, section, cash class),
+  - `commentary.toml`,
+  - `forecast.toml`,
+  - `actuals/`.
+
+  Kestrel Row moved to `companies/kestrel-row` with `model = "lettings"`.
+- **Chart of accounts** (`fpa/accounts.py`): sections are revenue, cost of sales, opex, depreciation, interest, tax and balance sheet (ignored). Standard subtotals: gross profit, EBITDA, EBIT, profit before tax, net income. The P&L layout in every sheet is generated from the chart, with line subtotals for cost lines.
+- **Cash:** timing classes per account replace the hardcoded account lists. The classes are rent collection, invoice, even, payroll, employer NI, pension, supplier with/without VAT, office rent and rates, bad debt, bank and non-cash. Empty payment lines are omitted.
+- **`fpa/importer.py`:** reads exports from accounting systems.
+  - It finds the header under report title lines and picks the delimiter (comma, semicolon or tab) by consistency.
+  - It matches column names by synonyms (code/nominal, debit/Dr, balance, YTD) and understands £, thousands separators and (negatives).
+  - Two layouts: trial balance (debit/credit or signed balance, monthly or year-to-date, which it converts to the month) and P&L by month. Headings and subtotals are skipped.
+  - Accounts are matched by code, or by name when the export has no codes.
+  - It stops on unknown accounts and names them, and it checks that the imported P&L reconciles to the file to the penny.
+- **`fpa/rules.py`:** rule-based budget for any company.
+  - Rules: growth (on the prior-year month), prior_year, pct_revenue, fixed, manual, tax. Defaults are set per section.
+  - Excel sheets: Prior year, Assumptions (the rules, in blue) and Budget, all with live formulas.
+  - The run-rate forecast scales the remaining budget by the year-to-date actual/budget of each section, plus adjustments. Scenarios apply multipliers.
+- **Variance:**
+  - A new rule `month_always` / `ytd_always` flags a variance on size alone.
+  - Flexed budget for costs budgeted as a share of sales: the variance is split into sales volume and cost share.
+  - The headline includes gross margin when there is cost of sales.
+- **Second demo company, Brightwell Cleaning Services Ltd (fictional):**
+  - Xero-style chart with balance-sheet accounts.
+  - `fpa/demo_brightwell.py` builds the prior-year P&L by month and year-to-date trial balances with balance-sheet accounts (debits = credits), in report layout.
+  - All of it is imported through the importer, exactly: 0 difference on every account and month.
+  - Events: the April wage rise, a lost contract in July, a materials price rise in August, a new contract in September.
+- **Results for Brightwell, September 2026:**
+  - YTD EBITDA is £23.4k vs £38.5k budget.
+  - Commentary finds the cleaners' cost share at 54.1% of sales vs 52.0% budgeted (−£9.1k), partly hidden by lower sales (+£6.8k), and the lost contract.
+  - The pack audits clean first time: 463 values, 0 mismatches, checks OK.
+- **Regression:** Kestrel budget, BvA, bridges, commentary, forecast and cash are unchanged (snapshot tests).
+- **Tests:** 58 passed, including Excel.

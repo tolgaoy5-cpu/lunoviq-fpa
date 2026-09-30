@@ -1,0 +1,26 @@
+period,account,description,debit,credit
+2026-08,200,Sales - Commercial contracts,,35338.74
+2026-08,201,Sales - Domestic cleaning,,16396.62
+2026-08,202,Sales - End of tenancy cleans,,15805.10
+2026-08,203,Sales - Carpet and upholstery,,3289.61
+2026-08,310,Direct wages - cleaners,34488.11,
+2026-08,311,Direct wages - employer NI,2655.58,
+2026-08,312,Direct wages - pension,1034.64,
+2026-08,320,Cleaning materials and supplies,4574.89,
+2026-08,325,Subcontractors,4099.99,
+2026-08,477,Office salaries,8900.00,
+2026-08,478,Employer NI - office,880.00,
+2026-08,479,Pension - office,267.00,
+2026-08,469,Rent,1650.00,
+2026-08,445,"Light, power, heating",229.40,
+2026-08,449,Motor vehicle expenses,3271.52,
+2026-08,450,Vehicle leasing,2400.00,
+2026-08,400,Advertising and marketing,924.79,
+2026-08,404,Bank and card fees,779.13,
+2026-08,412,Accountancy,600.00,
+2026-08,433,Insurance,560.00,
+2026-08,463,IT software and subscriptions,460.00,
+2026-08,489,Telephone and internet,310.00,
+2026-08,416,Depreciation,900.00,
+2026-08,437,Interest paid,210.00,
+2026-08,500,Corporation tax,408.75,

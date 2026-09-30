@@ -1,0 +1,21 @@
+# Latest estimate for the open months (run-rate method, fpa/rules.py).
+
+[latest_estimate]
+revenue = "ytd"
+cost_of_sales = "ytd"
+opex = "budget"
+adjustments = {"320" = 350.0}
+
+[latest_estimate.notes]
+revenue = "Year-to-date sales vs budget carried forward (lost contract partly replaced)."
+cost_of_sales = "Direct costs at the year-to-date run-rate: higher wage share after the April rise."
+opex = "Overheads as budgeted."
+
+[scenarios.upside]
+revenue_mult = 1.05
+description = "Two new commercial contracts start in November (+5% sales)."
+
+[scenarios.downside]
+revenue_mult = 0.92
+cost_mult = 1.02
+description = "A second contract is lost and costs rise 2% (-8% sales)."

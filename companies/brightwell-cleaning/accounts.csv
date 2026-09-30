@@ -1,0 +1,36 @@
+code,name,line,section,cash
+200,Sales - Commercial contracts,Commercial contracts,revenue,invoice
+201,Sales - Domestic cleaning,Domestic cleaning,revenue,even
+202,Sales - End of tenancy cleans,End of tenancy,revenue,even
+203,Sales - Carpet and upholstery,Specialist cleaning,revenue,even
+310,Direct wages - cleaners,Direct labour,cost_of_sales,payroll_gross
+311,Direct wages - employer NI,Direct labour,cost_of_sales,employer_ni
+312,Direct wages - pension,Direct labour,cost_of_sales,pension
+320,Cleaning materials and supplies,Materials,cost_of_sales,supplier_vat
+325,Subcontractors,Subcontractors,cost_of_sales,supplier_vat
+477,Office salaries,Staff costs,opex,payroll_gross
+478,Employer NI - office,Staff costs,opex,employer_ni
+479,Pension - office,Staff costs,opex,pension
+469,Rent,Premises,opex,supplier_vat
+445,"Light, power, heating",Premises,opex,supplier_vat
+449,Motor vehicle expenses,Vehicles,opex,supplier_vat
+450,Vehicle leasing,Vehicles,opex,supplier_vat
+400,Advertising and marketing,Marketing,opex,supplier_vat
+404,Bank and card fees,Overheads,opex,supplier_novat
+412,Accountancy,Overheads,opex,supplier_vat
+433,Insurance,Overheads,opex,supplier_novat
+463,IT software and subscriptions,Overheads,opex,supplier_vat
+489,Telephone and internet,Overheads,opex,supplier_vat
+416,Depreciation,Depreciation,depreciation,non_cash
+437,Interest paid,Interest,interest,bank
+500,Corporation tax,Corporation tax,tax,corporation_tax
+090,Business bank account,Bank,balance_sheet,
+610,Accounts receivable,Debtors,balance_sheet,
+710,Office equipment,Fixed assets,balance_sheet,
+720,Vehicles,Fixed assets,balance_sheet,
+800,Accounts payable,Creditors,balance_sheet,
+820,VAT,Creditors,balance_sheet,
+825,PAYE and NI payable,Creditors,balance_sheet,
+830,Corporation tax payable,Creditors,balance_sheet,
+900,Van loan,Loans,balance_sheet,
+960,Retained earnings,Equity,balance_sheet,
