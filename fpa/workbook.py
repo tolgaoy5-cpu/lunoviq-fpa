@@ -357,8 +357,13 @@ def build(co, path, month=None, root=None):
         out["actuals"] = actuals_sheet(wb, co, months, res)
         out["bva"] = bva_sheet(wb, co, months, res)
         out["variance"] = res
-        wb.move_sheet("BvA", offset=-(len(wb.sheetnames) - 1))
-        wb.move_sheet("Actuals", offset=-(len(wb.sheetnames) - 2))
+        from . import forecast
+        sc = forecast.scenarios(co, month, root=root)
+        out["forecast"] = forecast_sheet(wb, co, months, sc["base"], out["actuals"])
+        out["scenarios"] = scenarios_sheet(wb, co, sc)
+        out["scenario_results"] = sc
+        order = ["BvA", "Forecast", "Scenarios", "Actuals", "Budget", "Drivers", "Assumptions"]
+        wb._sheets = [wb[n] for n in order] + [ws for ws in wb._sheets if ws.title not in order]
     wb.calculation.fullCalcOnLoad = True
     wb.save(path)
     return out
@@ -565,3 +570,145 @@ def _bva_section(ws, row, text):
     ws.cell(row=row, column=1, value=text).font = F_BOLD
     for col in range(1, 14):
         ws.cell(row=row, column=col).fill = FILL_SECTION
+
+
+F_FCST = Font(name=FONT, size=9, color="5B2C83")
+
+
+def forecast_sheet(wb, co, months, fc, act_rows):
+    ws = wb.create_sheet("Forecast")
+    _title(ws, "Forecast %s: %s" % (fc["label"], co.fy_label()),
+           "%s. GBP, ex VAT. Actual months link to Actuals; forecast months (purple) come from the driver "
+           "engine (fpa.forecast) and config/forecast.toml." % co.name)
+    for col, w in (("Q", 3), ("R", 11), ("S", 10), ("T", 8)):
+        ws.column_dimensions[col].width = w
+    _index_row(ws, 3)
+    for i, m in enumerate(months):
+        c = ws.cell(row=3, column=FIRST_COL + i, value="Act" if fc["source"][m] == "A" else "Fcst")
+        c.font, c.alignment = (F_NOTE if fc["source"][m] == "A" else Font(name=FONT, size=8, italic=True, color="5B2C83")), Alignment(horizontal="right")
+    _month_header(ws, 4, months, co, "Management P&L")
+    for col, h in (("R", "Budget"), ("S", "Var"), ("T", "Var %")):
+        c = ws["%s4" % col]
+        c.value, c.fill, c.font, c.alignment = h, FILL_HEAD, F_HEAD, Alignment(horizontal="right")
+    r = pnl_rows(5)
+    ap = act_rows["pnl"]
+    for (kind, key, label), row in zip(pnl_layout(), range(5, 5 + len(pnl_layout()))):
+        if kind == "section":
+            _section(ws, row, label)
+            continue
+        if kind == "account":
+            def f(i, c, p, key=key, row=row):
+                m = months[i]
+                return "=Actuals!%s%d" % (c, ap["L" + key]) if fc["source"][m] == "A" else round(fc["pnl"][m][key], 2)
+            _row(ws, row, label, key, f, GBP, total="sum")
+            for i, m in enumerate(months):
+                if fc["source"][m] == "F":
+                    ws.cell(row=row, column=FIRST_COL + i).font = F_FCST
+            kind_rev = accounts.BY_CODE[key].kind == "revenue"
+        elif kind == "subtotal":
+            fn = SUBTOTALS[key]
+            _row(ws, row, label, "", lambda i, c, p, fn=fn: fn(c, r), GBP, F_BOLD, total="sum",
+                 border=TOP_BOTTOM if key in ("ebitda", "net_income") else TOP)
+            kind_rev = BVA_KIND[key] == "revenue"
+        elif kind == "ratio":
+            _row(ws, row, label, "", lambda i, c, p: "=IF(%s%d=0,0,%s%d/%s%d)" % (c, r["revenue"], c, r["ebitda"], c, r["revenue"]),
+                 PCT, F_NOTE, total="=IF(%s%d=0,0,%s%d/%s%d)" % (TOTAL, r["revenue"], TOTAL, r["ebitda"], TOTAL, r["revenue"]))
+            ws["R%d" % row] = "=Budget!%s%d" % (TOTAL, row)
+            ws["S%d" % row] = "=%s%d-R%d" % (TOTAL, row, row)
+            for col, fmt in (("R", PCT), ("S", VARPCT)):
+                ws["%s%d" % (col, row)].number_format, ws["%s%d" % (col, row)].font = fmt, F_NOTE
+            continue
+        else:
+            continue
+        ws["R%d" % row] = "=Budget!%s%d" % (TOTAL, row)
+        ws["S%d" % row] = ("=%s%d-R%d" % (TOTAL, row, row)) if kind_rev else ("=R%d-%s%d" % (row, TOTAL, row))
+        ws["T%d" % row] = "=IF(R%d=0,0,S%d/ABS(R%d))" % (row, row, row)
+        bold = kind == "subtotal"
+        for col, fmt in (("R", GBP), ("S", VAR), ("T", VARPCT)):
+            c = ws["%s%d" % (col, row)]
+            c.number_format, c.font = fmt, F_BOLD if bold else F_BASE
+
+    row = 5 + len(pnl_layout()) + 1
+    _section(ws, row, "Operating drivers")
+    kp = act_rows["kpis"]
+    drv = {d["month"]: d for d in fc["drivers"]}
+    for key, label, fmt, dkey in (("pum_close", "Properties at end of month", NUM1, "pum_close"),
+                                  ("avg_rent", "Average monthly rent", GBP, "avg_rent"),
+                                  ("let_only_lets", "Let-only lets", NUM1, "let_only_lets"),
+                                  ("relets", "Re-lets on managed stock", NUM1, "relets"),
+                                  ("headcount", "Headcount", NUM, "headcount")):
+        row += 1
+        _row(ws, row, label, "", lambda i, c, p, key=key, dkey=dkey: ("=Actuals!%s%d" % (c, kp[key]))
+             if fc["source"][months[i]] == "A" else round(drv[months[i]][dkey], 4), fmt,
+             total={"pum_close": "last", "avg_rent": "avg", "headcount": "last"}.get(key, "sum"))
+        for i, m in enumerate(months):
+            if fc["source"][m] == "F":
+                ws.cell(row=row, column=FIRST_COL + i).font = F_FCST
+
+    row += 2
+    _section(ws, row, "Latest estimate assumptions (config/forecast.toml)")
+    from .forecast import load_le
+    notes = load_le().get("latest_estimate", {}).get("notes", {})
+    for k, v in fc["assumptions"].items():
+        row += 1
+        ws.cell(row=row, column=1, value=k.replace("_", " ").capitalize()).font = F_BASE
+        c = ws.cell(row=row, column=3, value=round(v, 4))
+        c.font, c.number_format = F_INPUT, (PCT2 if abs(v) < 0.05 else ('0.000' if v < 5 else GBP))
+        ws.cell(row=row, column=4, value=notes.get(k, "")).font = F_NOTE
+    ws.freeze_panes = "D5"
+    return {"pnl": r}
+
+
+def scenarios_sheet(wb, co, sc):
+    ws = wb.create_sheet("Scenarios")
+    base = sc["base"]
+    _title(ws, "Scenarios: full-year outturn %s (%s)" % (co.fy_label(), base["label"]),
+           "%s. GBP, ex VAT. Base = latest estimate; upside and downside change the open months only." % co.name)
+    ws.column_dimensions["A"].width = 34
+    names = ["budget"] + list(sc)
+    heads = ["", "Budget"] + [n.capitalize() for n in sc]
+    for col, h in enumerate(heads, start=1):
+        c = ws.cell(row=4, column=col, value=h or None)
+        c.fill, c.font = FILL_HEAD, F_HEAD
+        if col > 1:
+            c.alignment = Alignment(horizontal="right")
+            ws.column_dimensions[get_column_letter(col)].width = 13
+    groups = lambda p: accounts.by_group(p)
+    rows = [("Total revenue", lambda r: r["revenue"], GBP, True), ("Staff costs", None, GBP, False),
+            ("Total operating costs", lambda r: r["opex"], GBP, False), ("EBITDA", lambda r: r["ebitda"], GBP, True),
+            ("EBITDA margin", lambda r: r["ebitda"] / r["revenue"], PCT, False),
+            ("Net income", lambda r: r["net_income"], GBP, True)]
+    row = 5
+    out = {}
+    for label, fn, fmt, bold in rows:
+        ws.cell(row=row, column=1, value=label).font = F_BOLD if bold else F_BASE
+        for j, n in enumerate(names):
+            if n == "budget":
+                t, p = base["budget_fy_totals"], base["budget_fy"]
+            else:
+                t, p = sc[n]["fy_totals"], sc[n]["fy"]
+            v = groups(p)["Staff costs"] if fn is None else fn(t)
+            c = ws.cell(row=row, column=2 + j, value=round(v, 4 if fmt == PCT else 2))
+            c.number_format, c.font = fmt, F_BOLD if bold else F_BASE
+        out[label] = row
+        row += 1
+    ws.cell(row=row, column=1, value="EBITDA vs budget").font = F_BASE
+    for j in range(1, len(names)):
+        col = get_column_letter(2 + j)
+        c = ws.cell(row=row, column=2 + j, value="=%s%d-$B$%d" % (col, out["EBITDA"], out["EBITDA"]))
+        c.number_format, c.font = VAR, F_BASE
+    row += 1
+    ws.cell(row=row, column=1, value="Properties under management at year end").font = F_BASE
+    for j, n in enumerate(names):
+        v = sc[n]["closing_pum"] if n != "budget" else base["budget_closing_pum"]
+        c = ws.cell(row=row, column=2 + j, value=round(v, 1))
+        c.number_format, c.font = NUM, F_BASE
+    row += 2
+    _bva_section(ws, row, "Scenario definitions")
+    from .forecast import load_le
+    le = load_le()
+    for n, d in le.get("scenarios", {}).items():
+        row += 1
+        ws.cell(row=row, column=1, value=n.capitalize()).font = F_BOLD
+        ws.cell(row=row, column=2, value=d.get("description", "")).font = F_BASE
+    return out

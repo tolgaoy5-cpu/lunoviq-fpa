@@ -1,0 +1,29 @@
+# Latest estimate (LE): changes to the budget drivers for the open months of the year.
+# The forecast starts from the actual closing position (portfolio, rent) of the last closed month.
+
+[latest_estimate]
+# Let-only and re-let activity: "ytd" applies the year-to-date achievement vs budget
+# (actual lets / budgeted lets) to the remaining months; or give a number (1.0 = budget).
+lets_factor = "ytd"
+rent_growth_monthly = 0.005          # market still rising, but slower than in H1 (0.6%)
+portals = 3680.0                     # August price rise continues
+
+[latest_estimate.notes]
+lets_factor = "Year-to-date let-only and re-let volumes vs budget carried forward."
+rent_growth_monthly = "Rents rose 0.6% a month in H1; 0.5% assumed for H2 as the market cools."
+portals = "Portal price rise from August (+15%) continues."
+
+# Scenarios apply these changes on top of the latest estimate.
+[scenarios.upside]
+lets_factor_mult = 1.10
+lost_rate_mult = 0.80
+gained_mult = 1.20
+rent_growth_add = 0.001
+description = "Lettings recover (+10% lets), churn falls 20%, stronger landlord wins and rent growth."
+
+[scenarios.downside]
+lets_factor_mult = 0.85
+lost_rate_mult = 1.30
+gained_mult = 0.80
+rent_growth_add = -0.002
+description = "Lettings weaken further (-15%), churn rises 30%, fewer new landlords, rents flatten."

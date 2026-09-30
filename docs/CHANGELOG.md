@@ -74,3 +74,29 @@
     - partly offset by staff savings of +£11.6k from the vacancy, and rents ahead of budget (+£4.0k).
 - **Excel vs Python:** the BvA sheet matches to within 5p on every line, and the flags match.
 - **Tests:** 19 passed.
+
+## 2026-09-30: Phase 4, rolling forecast and scenarios
+
+- **`fpa/forecast.py`:** a reforecast after the last closed month (6+6 after September).
+  - Closed months are taken from the actuals.
+  - Open months run on the driver engine from the actual closing position (properties, rent).
+  - The drivers are updated by the latest estimate in `config/forecast.toml`:
+    - year-to-date lettings achievement carried forward (0.85),
+    - rent growth of 0.5% a month,
+    - the portal price rise continues.
+  - The budget roster is used, including the October hire.
+  - Scenarios (`upside`, `downside`) change lets, churn, new landlords and rent growth for the open months only.
+- **Workbook:**
+  - **Forecast sheet:** actual months are linked to Actuals; forecast months are shown in purple. It adds full-year, budget and variance columns, forecast operating drivers, and the latest-estimate assumptions with notes.
+  - **Scenarios sheet:** budget vs base, upside and downside, with EBITDA vs budget, year-end portfolio and the scenario definitions.
+- **FY2026/27 outturn (6+6):**
+
+  | | EBITDA | vs budget |
+  |---|---|---|
+  | Budget | £239.3k | |
+  | Base | £194.8k | −£44.6k |
+  | Upside | £214.2k | |
+  | Downside | £167.3k | |
+
+- **Excel vs Python:** the forecast full year matches on every account.
+- **Tests:** 23 passed.
