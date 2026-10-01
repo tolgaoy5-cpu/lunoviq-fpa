@@ -6,10 +6,11 @@ cash) and writes a short summary for the board. Every number in its answer is
 then checked against those figures: if any amount or percentage cannot be found
 in the pack, the draft is rejected. The text is always labelled as an AI draft.
 
-Settings (never committed; local.toml is git-ignored):
+Settings (outside every repository, shared by Lunoviq and Lunoviq FP&A):
 
-    local.toml   [ai] provider = "openai" | "anthropic", api_key = "...", model = "..."
+    ~/.lunoviq/ai.toml   [ai] provider = "openai" | "anthropic", api_key = "...", model = "..."
     or the environment variables OPENAI_API_KEY / ANTHROPIC_API_KEY
+    (a local.toml in the project folder from earlier versions is still read)
 
 Nothing is sent unless the user asks for a summary. Standard library only.
 """
@@ -22,7 +23,10 @@ import urllib.request
 
 from .company import ROOT
 
-SETTINGS = ROOT / "local.toml"
+from pathlib import Path
+
+SETTINGS = Path.home() / ".lunoviq" / "ai.toml"
+LEGACY = ROOT / "local.toml"
 DEFAULT_MODEL = {"openai": "gpt-4o-mini", "anthropic": "claude-sonnet-5"}
 
 
@@ -33,9 +37,11 @@ class AIError(RuntimeError):
 def settings():
     """{"provider", "api_key", "model"} or None when no key is configured."""
     cfg = {}
-    if SETTINGS.exists():
-        with open(SETTINGS, "rb") as f:
-            cfg = tomllib.load(f).get("ai", {})
+    for path in (SETTINGS, LEGACY):
+        if path.exists():
+            with open(path, "rb") as f:
+                cfg = tomllib.load(f).get("ai", {})
+            break
     provider = cfg.get("provider") or ("anthropic" if os.environ.get("ANTHROPIC_API_KEY") and
                                        not os.environ.get("OPENAI_API_KEY") else "openai")
     key = cfg.get("api_key") or os.environ.get("%s_API_KEY" % provider.upper())
@@ -51,16 +57,21 @@ def save_settings(provider, api_key, model=""):
     if not re.fullmatch(r"[A-Za-z0-9_\-]{20,300}", key):
         raise AIError("that does not look like an API key")
     q = lambda s: '"%s"' % s.replace("\\", "\\\\").replace('"', '\\"')
-    text = "# Local settings: never committed (see .gitignore).\n[ai]\nprovider = %s\napi_key = %s\n" % (q(provider), q(key))
+    text = "# Lunoviq AI settings: on this computer only, outside every repository.\n[ai]\nprovider = %s\napi_key = %s\n" % (
+        q(provider), q(key))
     if model.strip():
         text += "model = %s\n" % q(model.strip())
+    SETTINGS.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     SETTINGS.write_text(text)
     os.chmod(SETTINGS, 0o600)
+    if LEGACY.exists():
+        LEGACY.unlink()
 
 
 def clear_settings():
-    if SETTINGS.exists():
-        SETTINGS.unlink()
+    for path in (SETTINGS, LEGACY):
+        if path.exists():
+            path.unlink()
 
 
 def facts(s):

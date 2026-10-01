@@ -303,11 +303,11 @@ async function renderSettings() {
       <p class="small">${st.configured ? `<span class="pill ok">Configured</span> ${esc(st.provider === "openai" ? "OpenAI" : "Anthropic")} · model ${esc(st.model)} · stored in ${esc(st.source)}` : '<span class="pill neutral">Not configured</span>'}</p>
       <form class="form add-form" id="sform" novalidate>
         <div class="field"><label for="s-prov">Provider</label><div class="inp"><select id="s-prov"><option value="openai"${st.provider !== "anthropic" ? " selected" : ""}>OpenAI</option><option value="anthropic"${st.provider === "anthropic" ? " selected" : ""}>Anthropic</option></select></div></div>
-        <div class="field"><label for="s-model">Model (optional)</label><div class="inp"><input id="s-model" placeholder="${st.provider === "anthropic" ? "claude-sonnet-5" : "gpt-4o-mini"}" value="${st.source === "local.toml" ? esc(st.model || "") : ""}"></div></div>
+        <div class="field"><label for="s-model">Model (optional)</label><div class="inp"><input id="s-model" placeholder="${st.provider === "anthropic" ? "claude-sonnet-5" : "gpt-4o-mini"}" value="${st.source && st.source !== "environment" ? esc(st.model || "") : ""}"></div></div>
         <div class="field" style="grid-column:1/-1"><label for="s-key">API key</label><div class="inp"><input id="s-key" type="password" autocomplete="off" placeholder="${st.configured ? "•••••••• (saved; paste a new key to replace)" : "paste your key"}"></div></div>
       </form>
-      <p class="muted small">The key is saved only on this computer in <code>local.toml</code> (excluded from git) and is never shown again.</p>
-      <div class="form-actions"><button class="btn btn-primary" id="s-save">Save</button>${st.source === "local.toml" ? '<button class="btn" id="s-clear">Remove key</button>' : ""}<span class="form-err" id="s-err" role="alert"></span></div>
+      <p class="muted small">The key is saved only on this computer in <code>~/.lunoviq/ai.toml</code> (outside the project, shared with Lunoviq) and is never shown again.</p>
+      <div class="form-actions"><button class="btn btn-primary" id="s-save">Save</button>${st.source && st.source !== "environment" ? '<button class="btn" id="s-clear">Remove key</button>' : ""}<span class="form-err" id="s-err" role="alert"></span></div>
     </div>`;
   $("#s-save").onclick = async () => {
     const err = $("#s-err"); err.textContent = "";

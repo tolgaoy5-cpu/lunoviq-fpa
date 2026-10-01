@@ -51,7 +51,8 @@ def test_draft_gives_up_after_two_bad_drafts(summary, monkeypatch):
 
 
 def test_settings_are_local_and_private(tmp_path, monkeypatch):
-    monkeypatch.setattr(ai, "SETTINGS", tmp_path / "local.toml")
+    monkeypatch.setattr(ai, "SETTINGS", tmp_path / "home" / "ai.toml")
+    monkeypatch.setattr(ai, "LEGACY", tmp_path / "local.toml")
     for v in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(v, raising=False)
     assert ai.settings() is None
@@ -59,7 +60,7 @@ def test_settings_are_local_and_private(tmp_path, monkeypatch):
         ai.save_settings("openai", "not a key")
     ai.save_settings("openai", "sk-test_" + "a" * 30, "gpt-test")
     assert ai.settings() == {"provider": "openai", "api_key": "sk-test_" + "a" * 30, "model": "gpt-test"}
-    assert stat.S_IMODE(os.stat(tmp_path / "local.toml").st_mode) == 0o600
+    assert stat.S_IMODE(os.stat(tmp_path / "home" / "ai.toml").st_mode) == 0o600
     ai.clear_settings()
     assert ai.settings() is None
     monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")

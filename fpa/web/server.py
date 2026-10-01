@@ -284,7 +284,8 @@ class Handler(BaseHTTPRequestHandler):
             from .. import ai
             cfg = ai.settings()
             return self._json({"configured": bool(cfg), "provider": cfg and cfg["provider"], "model": cfg and cfg["model"],
-                               "source": "local.toml" if ai.SETTINGS.exists() else ("environment" if cfg else None)})
+                               "source": ("~/.lunoviq/ai.toml" if ai.SETTINGS.exists() else "local.toml" if ai.LEGACY.exists()
+                                          else "environment" if cfg else None)})
         if u.path == "/api/state":
             try:
                 return self._json(app_state(q.get("company")))

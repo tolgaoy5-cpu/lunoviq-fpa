@@ -204,7 +204,8 @@ def test_add_company_wizard(base):
 def test_ai_settings_and_summary(base, tmp_path, monkeypatch):
     url, _ = base
     from fpa import ai
-    monkeypatch.setattr(ai, "SETTINGS", tmp_path / "local.toml")
+    monkeypatch.setattr(ai, "SETTINGS", tmp_path / "ai.toml")
+    monkeypatch.setattr(ai, "LEGACY", tmp_path / "local.toml")
     for v in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(v, raising=False)
     assert call(url + "/api/ai")[1]["configured"] is False
