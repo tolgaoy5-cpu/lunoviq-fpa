@@ -274,3 +274,10 @@ The user has an OpenAI account and asked to use it.
   - Overview: an Executive summary card; the draft is saved with the pack as `ai_summary.json`.
 - **Server:** it now always answers. An unexpected exception returns a JSON 500 instead of dropping the connection; the new web test caught the dropped connection.
 - **Tests:** 63 fast. The AI tests mock the service: figure check, retry, give-up, settings privacy and request shape.
+
+
+## 2026-10-01: Shared AI settings; direction check
+
+- **Shared key:** the AI key now lives in `~/.lunoviq/ai.toml`, shared with Lunoviq Valuation and outside every repository. The project `local.toml` is still read; saving moves the key to the new file.
+- **Direction check:** a draft that states a percentage comparison the wrong way round ("18.3% is higher than 20.7%") is rejected. This was found in Lunoviq Valuation's first live AI draft.
+- **README:** links the sister project.

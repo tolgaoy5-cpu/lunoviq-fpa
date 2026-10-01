@@ -77,3 +77,9 @@ def test_request_shape_for_openai(monkeypatch):
     assert ai.call({"provider": "openai", "api_key": "k", "model": "m"}, "hello") == "Summary."
     assert seen["url"].endswith("/v1/chat/completions") and seen["headers"]["Authorization"] == "Bearer k"
     assert json.dumps(seen["body"]).count("hello") == 1
+
+
+def test_wrong_direction_is_rejected(summary):
+    f = ai.facts(summary)
+    with pytest.raises(ai.AIError, match="18.3% is higher"):
+        ai.verify(GOOD + " The margin of 18.3% is higher than the budgeted 20.7%.", f)

@@ -37,6 +37,9 @@ Audit: 409 values checked, 0 mismatches, 0 Excel errors; model checks OK
 
 All data is synthetic and reproducible. See [the design notes](docs/DESIGN.md).
 
+**Sister project:** [Lunoviq Valuation](https://github.com/tolgaoy5-cpu/lunoviq-valuation) turns a US stock ticker
+into an audited DCF and comparables valuation model.
+
 ## What it does
 
 | Step | What happens | Where |

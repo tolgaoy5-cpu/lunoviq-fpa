@@ -102,7 +102,8 @@ def facts(s):
 
 PROMPT = """You are the head of FP&A writing the executive summary at the top of a monthly management pack
 for the board of {company}. Use ONLY the figures in the JSON below; do not calculate new numbers
-except simple differences already given as "variance". Write 5 or 6 short sentences in British English:
+except simple differences already given as "variance". A negative variance is adverse (below budget for income,
+above budget for costs); reuse the wording of the commentary for directions. Write 5 or 6 short sentences in British English:
 1) the headline for the year to date, 2) the two or three biggest drivers and their business reasons,
 3) the full-year outlook against budget, 4) cash and anything the board must decide.
 Write money as £ with one decimal in thousands (e.g. £19.7k) and percentages with one decimal.
@@ -134,8 +135,21 @@ def _numbers(obj):
     return out
 
 
+COMPARE = re.compile(r"(\d+(?:\.\d+)?)%[^.;]{0,80}?\b(higher|lower|above|below|greater|less)\b[^.;]{0,40}?(\d+(?:\.\d+)?)%", re.I)
+
+
+def check_directions(text):
+    """'x% ... higher/lower ... y%' must agree with the numbers (e.g. margins vs budget)."""
+    for m in COMPARE.finditer(text):
+        a, word, b = float(m.group(1)), m.group(2).lower(), float(m.group(3))
+        if a != b and (a > b) != (word in ("higher", "above", "greater")):
+            raise AIError("the draft says %s%% is %s %s%%" % (m.group(1), word, m.group(3)))
+
+
 def verify(text, f):
-    """Every amount and percentage in `text` must be one of the pack's figures (as written, rounded)."""
+    """Every amount and percentage in `text` must be one of the pack's figures (as written, rounded),
+    and stated comparisons between percentages must point the right way."""
+    check_directions(text)
     known = [abs(x) for x in _numbers(f)]
     bad = []
     for m in re.finditer(r"(£\s?\d[\d,]*(?:\.\d+)?\s?(?:k|m|bn)?|\d[\d,]*(?:\.\d+)?\s?%)", text):
